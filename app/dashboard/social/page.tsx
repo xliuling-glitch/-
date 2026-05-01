@@ -1,2 +1,2 @@
-import { ListPage } from '@/components/list-page';
-export default function Page(){return <ListPage title='social' cols={['日期','客服','状态','操作']} rows={[['2026-05-01','周晨','进行中','查看/编辑'],['2026-05-01','张治国','已完成','查看']]}/>}
+import { DynamicTable } from '@/components/dynamic-table';
+export default function Page(){return <div><h2 className='text-xl font-semibold mb-3'>social</h2><DynamicTable moduleKey='social' defaultColumns={['日期','客服','状态','备注']} /></div>}
