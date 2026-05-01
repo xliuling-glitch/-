@@ -1,0 +1,19 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "sqlite" url = env("DATABASE_URL") }
+model Role { id Int @id @default(autoincrement()) code String @unique name String users User[] }
+model User { id Int @id @default(autoincrement()) username String @unique passwordHash String name String roleId Int role Role @relation(fields:[roleId],references:[id]) tasks Task[] customers Customer[] }
+model ShiftSchedule { id Int @id @default(autoincrement()) date DateTime userId Int shift String startTime String endTime String user User @relation(fields:[userId],references:[id]) }
+model Customer { id Int @id @default(autoincrement()) code String @unique name String platform String level String ownerId Int owner User @relation(fields:[ownerId],references:[id]) followUps FollowUpRecord[] calls CallRecord[] reminders RepurchaseReminder[] tasks Task[] }
+model Task { id Int @id @default(autoincrement()) date DateTime userId Int user User @relation(fields:[userId],references:[id]) type String name String status String dueAt DateTime customerId Int? customer Customer? @relation(fields:[customerId],references:[id]) followUpId Int? callRecordId Int? }
+model FollowUpRecord { id Int @id @default(autoincrement()) date DateTime userId Int customerId Int customer Customer @relation(fields:[customerId],references:[id]) }
+model CallRecord { id Int @id @default(autoincrement()) date DateTime userId Int customerId Int connected Boolean durationSec Int validCall Boolean customer Customer @relation(fields:[customerId],references:[id]) }
+model InquiryConversion { id Int @id @default(autoincrement()) date DateTime userId Int platform String validInquiry Int dealCustomers Int amount Float }
+model KpiRecord { id Int @id @default(autoincrement()) date DateTime userId Int score Float reached Boolean }
+model RepurchaseReminder { id Int @id @default(autoincrement()) remindDate DateTime customerId Int status String customer Customer @relation(fields:[customerId],references:[id]) }
+model ReviewRecord { id Int @id @default(autoincrement()) date DateTime userId Int customerName String status String }
+model SocialPostRecord { id Int @id @default(autoincrement()) date DateTime userId Int type String posted Boolean }
+model CompetitorIntel { id Int @id @default(autoincrement()) date DateTime userId Int brand String platform String }
+model ProblemReview { id Int @id @default(autoincrement()) date DateTime userId Int type String detail String }
+model ScriptMaterial { id Int @id @default(autoincrement()) title String category String content String enabled Boolean @default(true) }
+model TaskRule { id Int @id @default(autoincrement()) shift String taskType String startTime String endTime String }
+model SystemSetting { id Int @id @default(autoincrement()) key String @unique value String }
