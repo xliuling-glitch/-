@@ -9,9 +9,16 @@ export async function GET(req: Request) {
     const q = searchParams.get('q') || '';
     const page = Number(searchParams.get('page') || 1);
     const pageSize = Number(searchParams.get('pageSize') || 10);
+    const status = searchParams.get('status') || '';
+    const date = searchParams.get('date') || '';
     const where: any = { AND: [] };
     if (session.role === 'service' || session.role === 'trainee') where.AND.push({ userId: session.id });
     if (q) where.AND.push({ OR: [{ type: { contains: q } }, { name: { contains: q } }] });
+    if (status) where.AND.push({ status });
+    if (date) {
+      const start = new Date(date); const end = new Date(date); end.setDate(end.getDate() + 1);
+      where.AND.push({ date: { gte: start, lt: end } });
+    }
     const finalWhere = where.AND.length ? where : {};
     const [items, total] = await Promise.all([
       prisma.task.findMany({ where: finalWhere, include: { user: true, customer: true }, skip: (page - 1) * pageSize, take: pageSize, orderBy: { id: 'desc' } }),

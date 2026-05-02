@@ -1,2 +1,2 @@
-import { ListPage } from '@/components/list-page';
-export default function Page(){return <ListPage title='task-rules' cols={['日期','客服','状态','操作']} rows={[['2026-05-01','周晨','进行中','查看/编辑'],['2026-05-01','张治国','已完成','查看']]}/>}
+import { DynamicTable } from '@/components/dynamic-table';
+export default function Page(){return <div><h2 className='text-xl font-semibold mb-3'>task-rules</h2><DynamicTable moduleKey='task-rules' defaultColumns={['日期','客服','状态','备注']} /></div>}

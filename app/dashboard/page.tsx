@@ -1,14 +1,24 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Card, Badge } from '@/components/ui';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Card } from '@/components/ui';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 export default function Home(){
-  const [summary,setSummary]=useState({taskCount:0,callCount:0,customerCount:0,avgKpi:0});
-  const [warnings,setWarnings]=useState<any[]>([]);
-  useEffect(()=>{fetch('/api/dashboard/summary').then(r=>r.json()).then(setSummary);fetch('/api/warnings').then(r=>r.json()).then(setWarnings);},[]);
-  const kpi=[{name:'团队KPI',score:summary.avgKpi},{name:'任务数',score:summary.taskCount},{name:'电联数',score:summary.callCount}];
-  return <div className='space-y-4'><div className='grid grid-cols-4 gap-3'><Card>今日任务数 {summary.taskCount}</Card><Card>今日电联数 {summary.callCount}</Card><Card>客户总数 {summary.customerCount}</Card><Card>平均KPI {summary.avgKpi}</Card></div>
-  <Card><h3 className='font-semibold mb-2'>异常预警</h3><div className='flex gap-2 flex-wrap'>{warnings.map((w,i)=><Badge key={i} color={w.level==='red'?'bg-red-100 text-red-700':w.level==='yellow'?'bg-yellow-100 text-yellow-700':'bg-green-100 text-green-700'} text={`${w.type}: ${w.value}`} />)}</div></Card>
-  <Card className='h-72'><h3>关键指标</h3><ResponsiveContainer width='100%' height='90%'><BarChart data={kpi}><XAxis dataKey='name'/><YAxis/><Tooltip/><Bar dataKey='score' fill='#3b82f6'/></BarChart></ResponsiveContainer></Card></div>
+  const today = new Date().toISOString().slice(0,10);
+  const [data,setData]=useState<any>({salesRank:[],shopShare:[],lostTop:[],inquiryTop:[],submitted:[],notSubmitted:[],daily:[]});
+  useEffect(()=>{fetch(`/api/dashboard/py-metrics?date=${today}`).then(r=>r.json()).then(setData)},[]);
+  return <div className='space-y-4'>
+    <div className='grid grid-cols-2 gap-3'>
+      <Card><h3 className='font-semibold'>✅ 今日已提交</h3><p>{data.submitted?.join('、') || '暂无'}</p></Card>
+      <Card><h3 className='font-semibold'>❌ 今日未提交</h3><p>{data.notSubmitted?.join('、') || '全员已提交'}</p></Card>
+    </div>
+    <div className='grid grid-cols-2 gap-3'>
+      <Card className='h-72'><h3>🏆 客服销售额排行榜</h3><ResponsiveContainer width='100%' height='90%'><BarChart data={data.salesRank}><XAxis dataKey='staff'/><YAxis/><Tooltip/><Bar dataKey='amount' fill='#2563eb' /></BarChart></ResponsiveContainer></Card>
+      <Card className='h-72'><h3>🛒 店铺成交额占比</h3><ResponsiveContainer width='100%' height='90%'><PieChart><Pie data={data.shopShare} dataKey='amount' nameKey='shop'>{['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6'].map((c)=><Cell key={c} fill={c}/> )}</Pie></PieChart></ResponsiveContainer></Card>
+    </div>
+    <div className='grid grid-cols-2 gap-3'>
+      <Card className='h-72'><h3>📉 流失原因 Top10</h3><ResponsiveContainer width='100%' height='90%'><BarChart layout='vertical' data={data.lostTop}><XAxis type='number'/><YAxis dataKey='reason' type='category' width={120}/><Tooltip/><Bar dataKey='count' fill='#ef4444' /></BarChart></ResponsiveContainer></Card>
+      <Card className='h-72'><h3>🧩 热门咨询产品 Top10</h3><ResponsiveContainer width='100%' height='90%'><BarChart data={data.inquiryTop}><XAxis dataKey='product'/><YAxis/><Tooltip/><Bar dataKey='count' fill='#10b981' /></BarChart></ResponsiveContainer></Card>
+    </div>
+  </div>;
 }
