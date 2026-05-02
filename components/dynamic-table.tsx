@@ -34,13 +34,35 @@ export function DynamicTable({ moduleKey, defaultColumns }: { moduleKey: string;
     setRows(parsed);
   };
 
+  const download = (name: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const downloadTemplate = () => {
+    download(`${moduleKey}_template.csv`, `${columns.join(',')}\n`);
+  };
+
+  const exportData = () => {
+    const head = columns.join(',');
+    const body = rows.map((r) => columns.map((c) => (r[c] ?? '')).join(',')).join('\n');
+    download(`${moduleKey}_export.csv`, `${head}\n${body}`);
+  };
+
   const tableRows = useMemo(() => rows, [rows]);
 
   return <div className='space-y-3'>
     <div className='flex gap-2 flex-wrap'>
       <input className='border p-2 rounded' value={newCol} onChange={(e)=>setNewCol(e.target.value)} placeholder='新增表头字段' />
       <button className='px-3 py-1 bg-blue-600 text-white rounded' onClick={addCol}>添加表头</button>
+      <button className='px-3 py-1 bg-slate-700 text-white rounded' onClick={downloadTemplate}>下载模板</button>
+      <button className='px-3 py-1 bg-indigo-600 text-white rounded' onClick={exportData}>导出CSV</button>
       <label className='px-3 py-1 bg-emerald-600 text-white rounded cursor-pointer'>导入CSV<input type='file' accept='.csv' className='hidden' onChange={(e)=>e.target.files?.[0]&&onCsv(e.target.files[0])}/></label>
+      <button className='px-3 py-1 bg-gray-600 text-white rounded' onClick={()=>setRows([...rows,{id:rows.length+1}])}>新增行</button>
     </div>
     <div className='bg-white border rounded p-4 overflow-auto'>
       <table className='w-full text-sm min-w-[900px]'>
