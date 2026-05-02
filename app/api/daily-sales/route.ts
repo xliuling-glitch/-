@@ -9,6 +9,8 @@ export async function GET(req:Request){
 
 export async function POST(req:Request){
   const b=await req.json();
-  const created=await prisma.dailySales.create({data:{date:b.date,staff:b.staff,shop:b.shop,reception:Number(b.reception||0),aftersale:Number(b.aftersale||0),invalidInquiry:Number(b.invalidInquiry||0),presale:Number(b.presale||0),deals:Number(b.deals||0),sales:Number(b.sales||0)}});
+  const sales=Number(b.sales||0);
+  const created=await prisma.dailySales.create({data:{date:b.date,staff:b.staff,shop:b.shop,reception:Number(b.reception||0),aftersale:Number(b.aftersale||0),invalidInquiry:Number(b.invalidInquiry||0),presale:Number(b.presale||0),deals:Number(b.deals||0),sales}});
+  await prisma.dailyActivity.upsert({where:{date_staff:{date:b.date,staff:b.staff}},update:{dealsAdded:{increment:Number(b.deals||0)},dealAmountAdded:{increment:sales},lastSubmitAt:new Date()},create:{date:b.date,staff:b.staff,dealsAdded:Number(b.deals||0),dealAmountAdded:sales}});
   return NextResponse.json(created);
 }
