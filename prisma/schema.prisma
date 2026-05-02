@@ -20,3 +20,5 @@ model SystemSetting { id Int @id @default(autoincrement()) key String @unique va
 model Lead { id Int @id @default(autoincrement()) createdAt DateTime @default(now()) date String staff String shop String inquiryType String model String customerType String buyerId String phone String? wechat String? wechatAdded Boolean holdSent Boolean intentLevel Int? tier String? note String? }
 model FollowupLog { id Int @id @default(autoincrement()) createdAt DateTime @default(now()) date String staff String shop String buyerId String status String statusNote String? isDeal Boolean dealAmount Float? lostReason String? nextAction String? }
 model DailyActivity { id Int @id @default(autoincrement()) date String staff String lastSubmitAt DateTime @default(now()) leadsAdded Int @default(0) followupsAdded Int @default(0) dealsAdded Int @default(0) dealAmountAdded Float @default(0) @@unique([date, staff]) }
+
+model DailySales { id Int @id @default(autoincrement()) date String staff String shop String reception Int aftersale Int invalidInquiry Int presale Int deals Int sales Float createdAt DateTime @default(now()) }
