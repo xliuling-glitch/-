@@ -11,7 +11,7 @@ model InquiryConversion { id Int @id @default(autoincrement()) date DateTime use
 model KpiRecord { id Int @id @default(autoincrement()) date DateTime userId Int score Float reached Boolean }
 model RepurchaseReminder { id Int @id @default(autoincrement()) remindDate DateTime customerId Int status String customer Customer @relation(fields:[customerId],references:[id]) }
 model ReviewRecord { id Int @id @default(autoincrement()) date DateTime userId Int customerName String status String }
-model SocialPostRecord { id Int @id @default(autoincrement()) date DateTime userId Int type String posted Boolean }
+model SocialPostRecord { id Int @id @default(autoincrement()) date DateTime userId Int type String posted Boolean screenshot String? note String? }
 model CompetitorIntel { id Int @id @default(autoincrement()) date DateTime userId Int brand String platform String }
 model ProblemReview { id Int @id @default(autoincrement()) date DateTime userId Int type String detail String }
 model ScriptMaterial { id Int @id @default(autoincrement()) title String category String content String enabled Boolean @default(true) }
