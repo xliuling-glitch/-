@@ -17,3 +17,6 @@ model ProblemReview { id Int @id @default(autoincrement()) date DateTime userId 
 model ScriptMaterial { id Int @id @default(autoincrement()) title String category String content String enabled Boolean @default(true) }
 model TaskRule { id Int @id @default(autoincrement()) shift String taskType String startTime String endTime String }
 model SystemSetting { id Int @id @default(autoincrement()) key String @unique value String }
+model Lead { id Int @id @default(autoincrement()) createdAt DateTime @default(now()) date String staff String shop String inquiryType String model String customerType String buyerId String phone String? wechat String? wechatAdded Boolean holdSent Boolean intentLevel Int? tier String? note String? }
+model FollowupLog { id Int @id @default(autoincrement()) createdAt DateTime @default(now()) date String staff String shop String buyerId String status String statusNote String? isDeal Boolean dealAmount Float? lostReason String? nextAction String? }
+model DailyActivity { id Int @id @default(autoincrement()) date String staff String lastSubmitAt DateTime @default(now()) leadsAdded Int @default(0) followupsAdded Int @default(0) dealsAdded Int @default(0) dealAmountAdded Float @default(0) @@unique([date, staff]) }
