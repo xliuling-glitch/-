@@ -168,17 +168,6 @@ model SystemSetting {
   value String
 }
 
-model Warning {
-  id        Int      @id @default(autoincrement())
-  date      DateTime
-  userId    Int
-  level     String
-  type      String
-  message   String
-  status    String   @default("pending")
-  resolvedAt DateTime?
-}
-
 model Lead {
   id           Int      @id @default(autoincrement())
   createdAt    DateTime @default(now())
@@ -214,14 +203,28 @@ model FollowupLog {
 }
 
 model DailyActivity {
-  id               Int      @id @default(autoincrement())
-  date             String
-  staff            String
-  lastSubmitAt     DateTime @default(now())
-  leadsAdded       Int      @default(0)
-  followupsAdded   Int      @default(0)
-  dealsAdded       Int      @default(0)
-  dealAmountAdded  Float    @default(0)
+  id              Int      @id @default(autoincrement())
+  date            String
+  staff           String
+  lastSubmitAt    DateTime @default(now())
+  leadsAdded      Int      @default(0)
+  followupsAdded  Int      @default(0)
+  dealsAdded      Int      @default(0)
+  dealAmountAdded Float    @default(0)
 
   @@unique([date, staff])
+}
+
+model DailySales {
+  id             Int      @id @default(autoincrement())
+  createdAt      DateTime @default(now())
+  date           String
+  staff          String
+  shop           String
+  reception      Int
+  aftersale      Int
+  invalidInquiry Int
+  presale        Int
+  deals          Int
+  sales          Float
 }
