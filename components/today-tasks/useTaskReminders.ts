@@ -36,7 +36,7 @@ export function useTaskReminders(instances: TaskInstance[], enabled: boolean) {
         timers.push(t);
       }
 
-      const end = parseTodayEnd(inst.date, inst.endTime, now);
+      const end = parseTodayEnd(inst.date, inst.endTime);
       if (end > now) {
         const delay = end.getTime() - now.getTime() + 500;
         const t2 = setTimeout(() => {
