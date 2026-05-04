@@ -26,6 +26,7 @@ model User {
   schedules    ShiftSchedule[]
   followUps    FollowUpRecord[] @relation("FollowUpUser")
   callRecords  CallRecord[]     @relation("CallUser")
+  reflections  DailyReflection[]
 }
 
 model ShiftSchedule {
@@ -123,13 +124,17 @@ model ReviewRecord {
 }
 
 model SocialPostRecord {
-  id     Int    @id @default(autoincrement())
-  date   DateTime
-  userId Int
-  type   String
-  posted Boolean
+  id         Int      @id @default(autoincrement())
+  date       DateTime
+  userId     Int
+  type       String
+  posted     Boolean
   screenshot String?
-  note String?
+  note       String?
+  /// 朋友圈：点赞数
+  points     Int?
+  /// 视频号：播放量
+  playCount  Int?
 }
 
 model CompetitorIntel {
@@ -146,6 +151,20 @@ model ProblemReview {
   userId Int
   type   String
   detail String
+}
+
+/// 客服每日自我复盘：当日问题 + 明日思考（每人每天一条）
+model DailyReflection {
+  id           Int      @id @default(autoincrement())
+  date         String
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id])
+  todayIssues  String   @default("")
+  tomorrowPlan String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([date, userId])
 }
 
 model ScriptMaterial {
@@ -202,6 +221,20 @@ model FollowupLog {
   dealAmount  Float?
   lostReason  String?
   nextAction  String?
+  /// 跟进方式：电话 / 微信 / 其他 / 自定义
+  channel     String   @default("微信")
+  /// 自定义说明，或「其他」的补充
+  channelNote String?
+  /// 第几次跟进：1–4（电联轮次）
+  attemptNo   Int      @default(1)
+  /// 本次跟进发生日期（可与业务日 date 不同）
+  followedAt  DateTime?
+  /// 客户购买欲望（可与线索 intent 同步填写）
+  purchaseIntent   String?
+  /// 客户分类（可与线索 customerType / tier 对齐）
+  customerCategory String?
+  /// 本次电联/跟进截图
+  screenshot       String?
 }
 
 model DailyActivity {
@@ -229,4 +262,32 @@ model DailySales {
   presale        Int
   deals          Int
   sales          Float
+}
+
+/// 每人每月售前/售后「总指标」（对齐白板）
+model StaffSalesBoardTarget {
+  id              Int      @id @default(autoincrement())
+  yearMonth       String
+  staff           String
+  presaleTarget   Float    @default(0)
+  aftersaleTarget Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([yearMonth, staff])
+}
+
+/// 每日补充：售前线下额；售后当日销售额、补发、退货（看板按日汇总/本月累计）
+model StaffDailyBoardSupplement {
+  id                Int      @id @default(autoincrement())
+  date              String
+  staff             String
+  presaleOffline    Float    @default(0)
+  aftersaleSales    Float    @default(0)
+  afterReshipAmount Float    @default(0)
+  afterRefundAmount Float    @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([date, staff])
 }

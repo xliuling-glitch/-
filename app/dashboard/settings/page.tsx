@@ -22,7 +22,7 @@ export default function Page() {
     <h2 className='text-xl font-semibold'>系统配置中心（兼容原PY版侧边栏）</h2>
     <div className='bg-white border rounded p-4 space-y-3'>
       {fields.map(([k, label]) => <div key={k}><div className='text-sm mb-1'>{label}</div><textarea className='w-full border rounded p-2 h-24' value={(cfg[k] || []).join('\n')} onChange={(e) => setCfg({ ...cfg, [k]: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean) })} /></div>)}
-      <button className='px-3 py-1 bg-blue-600 text-white rounded' onClick={save}>保存配置</button>
+      <button className='btn-primary text-sm' onClick={save}>保存配置</button>
     </div>
   </div>;
 }

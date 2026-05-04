@@ -1,2 +1,6 @@
-import { DynamicTable } from '@/components/dynamic-table';
-export default function Page(){return <div><h2 className='text-xl font-semibold mb-3'>task-rules</h2><DynamicTable moduleKey='task-rules' defaultColumns={['日期','客服','状态','备注']} /></div>}
+import { redirect } from 'next/navigation';
+
+/** 「任务规则」已从侧栏下线，旧链接跳转首页 */
+export default function TaskRulesRedirectPage() {
+  redirect('/dashboard');
+}
