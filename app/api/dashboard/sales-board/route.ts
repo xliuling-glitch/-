@@ -3,6 +3,24 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import { addCalendarDays, completionPct, monthStartDate, yearMonthFromDate } from '@/lib/sales-board';
 
+type PresaleBoardRow = {
+  staff: string;
+  presaleTarget: number;
+  salesMTD: number;
+  completionPct: number | null;
+  yesterdayPresale: number;
+  yesterdayOffline: number;
+};
+
+type AftersaleBoardRow = {
+  staff: string;
+  aftersaleTarget: number;
+  salesMTD: number;
+  completionPct: number | null;
+  reshipMTD: number;
+  refundMTD: number;
+};
+
 async function roster(): Promise<string[]> {
   const row = await prisma.systemSetting.findUnique({ where: { key: 'staff_roster' } });
   if (!row) return [];
