@@ -32,6 +32,7 @@ export function AssignmentsPanel({
   const [shift, setShift] = useState('');
   const [pick, setPick] = useState<Record<string, boolean>>({});
   const [kpiTag, setKpiTag] = useState(false);
+  const [requiresSupervisorReview, setRequiresSupervisorReview] = useState(false);
   const [tplId, setTplId] = useState('');
 
   const toggle = (n: string) => setPick((p) => ({ ...p, [n]: !p[n] }));
@@ -69,11 +70,13 @@ export function AssignmentsPanel({
       shiftLabel: shift.trim(),
       active: true,
       kpiTag,
+      requiresSupervisorReview: requiresSupervisorReview || undefined,
       createdAt: new Date().toISOString(),
     };
     setData((s) => ({ ...s, assignments: [a, ...s.assignments] }));
     setTitle('');
     setTplId('');
+    setRequiresSupervisorReview(false);
   };
 
   const remove = (id: string) => setData((s) => ({ ...s, assignments: s.assignments.filter((x) => x.id !== id) }));
@@ -81,6 +84,12 @@ export function AssignmentsPanel({
     setData((s) => ({
       ...s,
       assignments: s.assignments.map((x) => (x.id === id ? { ...x, active: !x.active } : x)),
+    }));
+
+  const toggleReview = (id: string) =>
+    setData((s) => ({
+      ...s,
+      assignments: s.assignments.map((x) => (x.id === id ? { ...x, requiresSupervisorReview: !x.requiresSupervisorReview } : x)),
     }));
 
   return (
@@ -171,6 +180,10 @@ export function AssignmentsPanel({
             <input type="checkbox" checked={kpiTag} onChange={(e) => setKpiTag(e.target.checked)} />
             完成后提示计入 KPI（联动占位）
           </label>
+          <label className="flex items-center gap-2 text-xs text-graphite sm:col-span-2">
+            <input type="checkbox" checked={requiresSupervisorReview} onChange={(e) => setRequiresSupervisorReview(e.target.checked)} />
+            完成后需主管审核（待审核为黄色标签）
+          </label>
         </div>
         <div className="mt-3">
           <span className="text-xs font-medium text-graphite">指派客服</span>
@@ -203,9 +216,12 @@ export function AssignmentsPanel({
                 {a.startTime}-{a.endTime} · {a.priority} · {a.staffNames.join('、')}
               </span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button type="button" className="text-xs text-graphite underline" onClick={() => toggleActive(a.id)}>
                 {a.active ? '停用' : '启用'}
+              </button>
+              <button type="button" className="text-xs text-amber-800 underline" onClick={() => toggleReview(a.id)}>
+                {a.requiresSupervisorReview ? '取消主管审' : '需主管审'}
               </button>
               <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => remove(a.id)}>
                 删除

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { ReviewAssignment } from '@/lib/review-hub/types';
+import { removeReviewHubAssignmentFromTodayTasks, upsertReviewHubAssignmentInTodayTasks } from '@/lib/review-hub/today-task-bridge';
 import { useOptionsShops, useReviewHub } from '@/components/review-hub/useReviewHub';
 
 export default function ReviewAssignmentsPage() {
@@ -31,6 +32,7 @@ export default function ReviewAssignmentsPage() {
       createdAt: new Date().toISOString(),
     };
     setData((d) => ({ ...d, assignments: [a, ...d.assignments] }));
+    upsertReviewHubAssignmentInTodayTasks(a);
     setTitle('');
     setPick({});
   };
@@ -41,6 +43,7 @@ export default function ReviewAssignmentsPage() {
       assignments: d.assignments.filter((x) => x.id !== id),
       submissions: d.submissions.filter((s) => s.taskId !== id),
     }));
+    removeReviewHubAssignmentFromTodayTasks(id);
   };
 
   const pickCount = useMemo(() => staffRoster.filter((n) => pick[n]).length, [pick, staffRoster]);
@@ -102,6 +105,9 @@ export default function ReviewAssignmentsPage() {
         >
           创建任务
         </button>
+        <p className="mt-2 text-xs text-slate-mid">
+          创建后会同步到「今日任务中心」：被指派的客服在对应日期的工作台会出现<strong className="text-graphite">每日待办</strong>（任务类型：评价管理）；请在「我的任务」中提交订单等记录。
+        </p>
       </div>
 
       <div>

@@ -2,6 +2,8 @@
 export const DASHBOARD_NAV_ITEMS: { label: string; path: string }[] = [
   { label: '工作台首页', path: '/dashboard' },
   { label: '今日任务中心', path: '/dashboard/tasks' },
+  { label: 'KPI每日上传中心', path: '/dashboard/kpi-daily' },
+  { label: '主管数据看板', path: '/dashboard/supervisor-board' },
   { label: '客户管理', path: '/dashboard/customers' },
   { label: '客户跟进', path: '/dashboard/followups' },
   { label: '电联管理', path: '/dashboard/calls' },
@@ -11,7 +13,6 @@ export const DASHBOARD_NAV_ITEMS: { label: string; path: string }[] = [
   { label: '老客复购', path: '/dashboard/repurchase' },
   { label: '评价管理中心', path: '/dashboard/reviews' },
   { label: '朋友圈/视频号', path: '/dashboard/social' },
-  { label: '竞品假聊', path: '/dashboard/competitors' },
   { label: '问题复盘', path: '/dashboard/problems' },
   { label: 'AI运用反馈', path: '/dashboard/scripts' },
   { label: '排班管理', path: '/dashboard/schedules' },

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReviewHubData } from '@/lib/review-hub/types';
 import { loadReviewHub, saveReviewHub } from '@/lib/review-hub/storage';
+import { syncAllReviewAssignmentsToTodayTasks } from '@/lib/review-hub/today-task-bridge';
 
 export function useReviewHub() {
   const [data, setDataState] = useState<ReviewHubData>(() =>
@@ -11,8 +12,10 @@ export function useReviewHub() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setDataState(loadReviewHub());
+    const d = loadReviewHub();
+    setDataState(d);
     setHydrated(true);
+    syncAllReviewAssignmentsToTodayTasks(d.assignments);
   }, []);
 
   const setData = useCallback((next: ReviewHubData | ((prev: ReviewHubData) => ReviewHubData)) => {

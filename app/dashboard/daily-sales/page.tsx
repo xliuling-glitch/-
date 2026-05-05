@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { CsvTemplateUpload } from '@/components/csv-template-upload';
+import { formatAmountYuan } from '@/lib/format-amount';
 
 const headers = ['店铺','姓名','接待人数','售后人数','无效询单','售前人数','成交人数','日销售额'];
 
@@ -38,5 +39,5 @@ export default function Page(){
       <input className='border p-2' placeholder='日销售额' type='number' value={f.sales} onChange={e=>setF({...f,sales:Number(e.target.value)})}/>
     </div>
     <button className='btn-primary mt-2 w-full text-sm' onClick={add}>提交</button>
-  </div><div className='bg-white border rounded p-3'>今日提交情况：{rows.length} 条；数据明细总销售额：¥{total}</div><div className='bg-white border rounded p-3 overflow-auto'><table className='w-full text-sm'><thead><tr><th>日期</th><th>店铺</th><th>姓名</th><th>接待</th><th>售后</th><th>无效询单</th><th>售前</th><th>成交</th><th>日销</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i} className='border-t'><td>{r.date}</td><td>{r.shop}</td><td>{r.staff}</td><td>{r.reception}</td><td>{r.aftersale}</td><td>{r.invalidInquiry}</td><td>{r.presale}</td><td>{r.deals}</td><td>{r.sales}</td></tr>)}</tbody></table></div></div>
+  </div><div className='bg-white border rounded p-3'>今日提交情况：{rows.length} 条；数据明细总销售额：{formatAmountYuan(total)}</div><div className='bg-white border rounded p-3 overflow-auto'><table className='w-full text-sm'><thead><tr><th>日期</th><th>店铺</th><th>姓名</th><th>接待</th><th>售后</th><th>无效询单</th><th>售前</th><th>成交</th><th>日销</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i} className='border-t'><td>{r.date}</td><td>{r.shop}</td><td>{r.staff}</td><td>{r.reception}</td><td>{r.aftersale}</td><td>{r.invalidInquiry}</td><td>{r.presale}</td><td>{r.deals}</td><td className="tabular-nums">{formatAmountYuan(Number(r.sales||0))}</td></tr>)}</tbody></table></div></div>
 }

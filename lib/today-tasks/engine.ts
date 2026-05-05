@@ -6,6 +6,7 @@ import type {
   TaskInstance,
   TodayTaskState,
 } from './types';
+import type { WorkflowStatusKey } from '@/lib/workflow-status';
 
 export function hasAttachmentCredentials(c: CompletionRecord): boolean {
   const list = c.attachments ?? [];
@@ -91,6 +92,33 @@ export function computeStatus(
   return 'pending';
 }
 
+/** 业务闭环：含「主管审核通过」才计完成（用于统计） */
+export function isFullyClosed(inst: TaskInstance): boolean {
+  if (!isSatisfied(inst.completionMode, inst.completion, inst.quantityTarget)) return false;
+  if (!inst.requiresSupervisorReview) return true;
+  return inst.completion.reviewState === 'approved';
+}
+
+/** 五色状态：与主管看板、任务列表展示一致 */
+export function computeWorkflowStatus(inst: TaskInstance, now: Date): WorkflowStatusKey {
+  const sat = isSatisfied(inst.completionMode, inst.completion, inst.quantityTarget);
+  const review = inst.completion.reviewState ?? 'none';
+
+  if (inst.requiresSupervisorReview) {
+    if (review === 'rejected') return 'rejected';
+    if (sat && review !== 'approved') return 'pending_review';
+    if (sat && review === 'approved') return 'completed';
+  } else if (sat) {
+    return 'completed';
+  }
+
+  const end = parseTodayEnd(inst.date, inst.endTime);
+  const start = parseTodayStart(inst.date, inst.startTime);
+  if (now > end) return 'overdue';
+  if (now < start) return 'incomplete';
+  return 'in_progress';
+}
+
 export function buildInstances(state: TodayTaskState, dateStr: string): TaskInstance[] {
   const out: TaskInstance[] = [];
   for (const a of state.assignments) {
@@ -111,6 +139,13 @@ export function buildInstances(state: TodayTaskState, dateStr: string): TaskInst
         quantityTarget: a.quantityTarget ?? 1,
         shiftLabel: a.shiftLabel ?? '',
         kpiTag: !!a.kpiTag,
+        requiresSupervisorReview: !!a.requiresSupervisorReview,
+        taskType: a.taskType ?? '例行',
+        description: a.description ?? '',
+        shiftCode: a.shiftCode ?? 'all',
+        createdBy: a.createdBy ?? '系统',
+        assignmentCreatedAt: a.createdAt,
+        assignmentUpdatedAt: a.updatedAt ?? a.createdAt,
         completion,
       });
     }
@@ -121,6 +156,16 @@ export function buildInstances(state: TodayTaskState, dateStr: string): TaskInst
     if (pa !== pb) return pa - pb;
     return a.startTime.localeCompare(b.startTime);
   });
+}
+
+/** 达成完成条件且需主管审时自动置为 pending */
+export function augmentCompletionPatch(inst: TaskInstance, patch: CompletionRecord): CompletionRecord {
+  const merged: CompletionRecord = { ...inst.completion, ...patch };
+  const will = isSatisfied(inst.completionMode, merged, inst.quantityTarget);
+  if (will && inst.requiresSupervisorReview && merged.reviewState !== 'approved' && merged.reviewState !== 'rejected') {
+    return { ...patch, reviewState: 'pending' };
+  }
+  return patch;
 }
 
 export function mergeCompletion(

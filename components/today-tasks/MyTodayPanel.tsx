@@ -3,25 +3,15 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { CompletionRecord, TaskInstance, TodayTaskState } from '@/lib/today-tasks/types';
-import {
-  buildInstances,
-  computeStatus,
-  isSatisfied,
-  mergeCompletion,
-} from '@/lib/today-tasks/engine';
+import { augmentCompletionPatch, buildInstances, computeWorkflowStatus, isSatisfied, mergeCompletion } from '@/lib/today-tasks/engine';
 import { TaskCredentialsEditor } from './TaskCredentialsEditor';
+import { WorkflowStatusBadge } from '@/components/workflow-status-badge';
 
 function priorityClass(p: string) {
   if (p === 'P0') return 'bg-red-100 text-red-800 border-red-200';
   if (p === 'P1') return 'bg-amber-100 text-amber-900 border-amber-200';
   if (p === 'P2') return 'bg-sky-100 text-sky-900 border-sky-200';
   return 'bg-ash text-graphite border-ash';
-}
-
-function statusLabel(s: string) {
-  if (s === 'done') return { text: '已完成', className: 'text-mint-pulse' };
-  if (s === 'overdue') return { text: '已逾期', className: 'text-red-600' };
-  return { text: '待完成', className: 'text-slate-mid' };
 }
 
 export function MyTodayPanel({
@@ -47,20 +37,21 @@ export function MyTodayPanel({
   }, [data, date, staff, tick]);
 
   const patch = (inst: TaskInstance, patchRec: CompletionRecord) => {
-    setData((s) => mergeCompletion(s, inst.instanceKey, patchRec));
+    setData((s) => mergeCompletion(s, inst.instanceKey, augmentCompletionPatch(inst, patchRec)));
   };
 
   const tryComplete = (inst: TaskInstance) => {
     setData((s) => {
-      const patchRec: CompletionRecord = { completedAt: new Date().toISOString() };
+      const patchRec = augmentCompletionPatch(inst, { completedAt: new Date().toISOString() });
       const nextState = mergeCompletion(s, inst.instanceKey, patchRec);
       const rec = nextState.completions[inst.instanceKey] ?? {};
-      if (
-        inst.kpiTag &&
-        isSatisfied(inst.completionMode, rec, inst.quantityTarget)
-      ) {
+      if (inst.kpiTag && isSatisfied(inst.completionMode, rec, inst.quantityTarget)) {
         queueMicrotask(() =>
-          window.alert('任务已完成。若已勾选 KPI 关联，请到「KPI绩效」核对是否计入。'),
+          window.alert(
+            inst.requiresSupervisorReview
+              ? '已提交完成，等待主管审核通过后方计为闭环。'
+              : '任务已完成。若已勾选 KPI 关联，请到「KPI绩效」核对是否计入。',
+          ),
         );
       }
       return nextState;
@@ -80,8 +71,7 @@ export function MyTodayPanel({
       ) : (
         <ul className="space-y-3">
           {instances.map((inst) => {
-            const st = computeStatus(inst, new Date());
-            const sl = statusLabel(st);
+            const wf = computeWorkflowStatus(inst, new Date());
             const sat = isSatisfied(inst.completionMode, inst.completion, inst.quantityTarget);
             return (
               <li
@@ -96,8 +86,11 @@ export function MyTodayPanel({
                       {inst.startTime} – {inst.endTime}
                       {inst.shiftLabel ? <span className="ml-2 text-stone">· {inst.shiftLabel}</span> : null}
                     </p>
+                    {inst.requiresSupervisorReview ? (
+                      <p className="mt-1 text-[10px] text-amber-800">本任务完成后需主管审核</p>
+                    ) : null}
                   </div>
-                  <div className={`text-sm font-medium ${sl.className}`}>{sat ? '已完成' : sl.text}</div>
+                  <WorkflowStatusBadge status={wf} />
                 </div>
 
                 <div className="mt-3 space-y-2 border-t border-black/5 pt-3">
@@ -132,10 +125,11 @@ export function MyTodayPanel({
                         onClick={() => {
                           const qty = inst.completion.quantityDone ?? 0;
                           const done = qty >= inst.quantityTarget;
-                          patch(inst, {
+                          const base: CompletionRecord = {
                             quantityDone: qty,
                             ...(done ? { completedAt: new Date().toISOString() } : { completedAt: undefined }),
-                          });
+                          };
+                          patch(inst, done ? augmentCompletionPatch(inst, base) : base);
                           if (!done) {
                             window.alert(`完成数量需达到目标 ${inst.quantityTarget} 后方可打卡完成。`);
                           }

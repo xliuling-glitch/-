@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui';
+import { formatAmountYuan } from '@/lib/format-amount';
 
 type PresaleRow = {
   staff: string;
@@ -29,10 +30,6 @@ type BoardPayload = {
   presale: { rows: PresaleRow[]; totals: Record<string, number | null> };
   aftersale: { rows: AfterRow[]; totals: Record<string, number | null> };
 };
-
-function fmtMoney(n: number) {
-  return n.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
 
 function ProgressBar({ pct }: { pct: number | null }) {
   if (pct == null) {
@@ -118,21 +115,21 @@ export function DashboardSalesBoard() {
                   {data.presale.rows.map((r) => (
                     <tr key={r.staff} className="border-b border-ash/60 last:border-0">
                       <td className="px-3 py-2 font-medium text-coal-ink">{r.staff}</td>
-                      <td className="px-3 py-2 tabular-nums">{fmtMoney(r.presaleTarget)}</td>
-                      <td className="px-3 py-2 tabular-nums">{fmtMoney(r.salesMTD)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatAmountYuan(r.presaleTarget)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatAmountYuan(r.salesMTD)}</td>
                       <td className="px-3 py-2">
                         <ProgressBar pct={r.completionPct} />
                       </td>
-                      <td className="px-3 py-2 tabular-nums text-graphite">{fmtMoney(r.yesterdayPresale)}</td>
-                      <td className="px-3 py-2 tabular-nums text-graphite">{fmtMoney(r.yesterdayOffline)}</td>
+                      <td className="px-3 py-2 tabular-nums text-graphite">{formatAmountYuan(r.yesterdayPresale)}</td>
+                      <td className="px-3 py-2 tabular-nums text-graphite">{formatAmountYuan(r.yesterdayOffline)}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot className="bg-coal-ink/[0.04] text-sm font-semibold text-coal-ink">
                   <tr>
                     <td className="px-3 py-2">合计 / 均值</td>
-                    <td className="px-3 py-2 tabular-nums">{fmtMoney(Number(data.presale.totals.presaleTarget ?? 0))}</td>
-                    <td className="px-3 py-2 tabular-nums">{fmtMoney(Number(data.presale.totals.salesMTD ?? 0))}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatAmountYuan(Number(data.presale.totals.presaleTarget ?? 0))}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatAmountYuan(Number(data.presale.totals.salesMTD ?? 0))}</td>
                     <td className="px-3 py-2">
                       <ProgressBar pct={data.presale.totals.completionPct as number | null} />
                     </td>
@@ -165,26 +162,26 @@ export function DashboardSalesBoard() {
                   {data.aftersale.rows.map((r) => (
                     <tr key={r.staff} className="border-b border-ash/60 last:border-0">
                       <td className="px-3 py-2 font-medium text-coal-ink">{r.staff}</td>
-                      <td className="px-3 py-2 tabular-nums">{fmtMoney(r.aftersaleTarget)}</td>
-                      <td className="px-3 py-2 tabular-nums">{fmtMoney(r.salesMTD)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatAmountYuan(r.aftersaleTarget)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatAmountYuan(r.salesMTD)}</td>
                       <td className="px-3 py-2">
                         <ProgressBar pct={r.completionPct} />
                       </td>
-                      <td className="px-3 py-2 tabular-nums text-graphite">{fmtMoney(r.reshipMTD)}</td>
-                      <td className="px-3 py-2 tabular-nums text-graphite">{fmtMoney(r.refundMTD)}</td>
+                      <td className="px-3 py-2 tabular-nums text-graphite">{formatAmountYuan(r.reshipMTD)}</td>
+                      <td className="px-3 py-2 tabular-nums text-graphite">{formatAmountYuan(r.refundMTD)}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot className="bg-coal-ink/[0.04] text-sm font-semibold text-coal-ink">
                   <tr>
                     <td className="px-3 py-2">合计</td>
-                    <td className="px-3 py-2 tabular-nums">{fmtMoney(Number(data.aftersale.totals.aftersaleTarget ?? 0))}</td>
-                    <td className="px-3 py-2 tabular-nums">{fmtMoney(Number(data.aftersale.totals.salesMTD ?? 0))}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatAmountYuan(Number(data.aftersale.totals.aftersaleTarget ?? 0))}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatAmountYuan(Number(data.aftersale.totals.salesMTD ?? 0))}</td>
                     <td className="px-3 py-2">
                       <ProgressBar pct={data.aftersale.totals.completionPct as number | null} />
                     </td>
-                    <td className="px-3 py-2 tabular-nums">{fmtMoney(Number(data.aftersale.totals.reshipMTD ?? 0))}</td>
-                    <td className="px-3 py-2 tabular-nums">{fmtMoney(Number(data.aftersale.totals.refundMTD ?? 0))}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatAmountYuan(Number(data.aftersale.totals.reshipMTD ?? 0))}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatAmountYuan(Number(data.aftersale.totals.refundMTD ?? 0))}</td>
                   </tr>
                 </tfoot>
               </table>

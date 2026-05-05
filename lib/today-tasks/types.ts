@@ -20,6 +20,8 @@ export type TaskTemplate = {
   createdAt: string;
 };
 
+export type ShiftCode = 'day' | 'night' | 'all';
+
 export type TaskAssignment = {
   id: string;
   templateId?: string;
@@ -36,6 +38,16 @@ export type TaskAssignment = {
   shiftLabel: string;
   active: boolean;
   kpiTag: boolean;
+  /** 完成后需主管审核（与 CompletionRecord.reviewState 配合，便于日后同步 DB） */
+  requiresSupervisorReview?: boolean;
+  /** 任务类型（筛选/统计用，预留 DB） */
+  taskType?: string;
+  /** 任务说明 */
+  description?: string;
+  /** 班次：白班 / 晚班 / 全部 */
+  shiftCode?: ShiftCode;
+  createdBy?: string;
+  updatedAt?: string;
   createdAt: string;
 };
 
@@ -51,6 +63,8 @@ export type TaskAttachment = {
 };
 
 export type CompletionRecord = {
+  /** 客服点击「开始任务」记录 */
+  startedAt?: string;
   completedAt?: string;
   quantityDone?: number;
   effectiveQty?: number;
@@ -60,6 +74,8 @@ export type CompletionRecord = {
   customerRef?: string;
   deferNote?: string;
   dailyReportSummary?: string;
+  /** 主管审核：none=未走审核流，pending=待审，approved=已通过，rejected=已驳回 */
+  reviewState?: 'none' | 'pending' | 'approved' | 'rejected';
 };
 
 export type TodayTaskState = {
@@ -82,7 +98,44 @@ export type TaskInstance = {
   quantityTarget: number;
   shiftLabel: string;
   kpiTag: boolean;
+  requiresSupervisorReview: boolean;
+  taskType: string;
+  description: string;
+  shiftCode: ShiftCode;
+  createdBy: string;
+  assignmentCreatedAt: string;
+  assignmentUpdatedAt: string;
   completion: CompletionRecord;
+};
+
+/**
+ * 工作台/API 对齐用视图模型（与 TaskInstance + Completion 对应，便于日后落库）
+ */
+export type DailyTaskItem = {
+  id: string;
+  date: string;
+  employeeName: string;
+  shift: string;
+  taskName: string;
+  taskType: string;
+  description: string;
+  startTime: string;
+  endTime: string;
+  priority: Priority;
+  completionMethod: string;
+  targetCount: number;
+  completedCount: number;
+  needReview: boolean;
+  status: 'not_started' | 'in_progress' | 'completed' | 'pending_review' | 'overdue' | 'rejected';
+  proofImages: { id: string; dataUrl: string; name?: string }[];
+  relatedCustomer: string;
+  remark: string;
+  delayReason: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  assignmentId: string;
+  instanceKey: string;
 };
 
 export type DisplayStatus = 'pending' | 'done' | 'overdue';

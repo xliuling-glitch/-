@@ -2,20 +2,21 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { getInitialTaskState } from '@/lib/today-tasks/seed';
-import { getTaskStaffName, saveTodayTasks, setTaskStaffName } from '@/lib/today-tasks/storage';
+import { getTaskStaffName, loadTodayTasks, saveTodayTasks, setTaskStaffName } from '@/lib/today-tasks/storage';
+import { WORKSPACE_STORAGE_UPDATED } from '@/lib/workspace-events';
 import { buildInstances } from '@/lib/today-tasks/engine';
 import { cn } from '@/lib/utils';
 import { requestNotificationPermission, useTaskReminders } from './useTaskReminders';
-import { MyTodayPanel } from './MyTodayPanel';
+import { TodayWorkbench } from './TodayWorkbench';
 import { TemplatesPanel } from './TemplatesPanel';
 import { AssignmentsPanel } from './AssignmentsPanel';
 import { SupervisorPanel } from './SupervisorPanel';
 import type { TodayTaskState } from '@/lib/today-tasks/types';
 
-type Tab = 'my' | 'tpl' | 'asg' | 'sup';
+type Tab = 'workbench' | 'tpl' | 'asg' | 'sup';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'my', label: '我的今日' },
+  { id: 'workbench', label: '今日工作台' },
   { id: 'tpl', label: '任务模板' },
   { id: 'asg', label: '分配任务' },
   { id: 'sup', label: '主管看板' },
@@ -23,7 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function TodayTasksApp() {
   const [data, setData] = useState<TodayTaskState>(getInitialTaskState);
-  const [tab, setTab] = useState<Tab>('my');
+  const [tab, setTab] = useState<Tab>('workbench');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [staff, setStaff] = useState('');
   const [roster, setRoster] = useState<string[]>([]);
@@ -32,6 +33,12 @@ export function TodayTasksApp() {
   useEffect(() => {
     saveTodayTasks(data);
   }, [data]);
+
+  useEffect(() => {
+    const reload = () => setData(loadTodayTasks());
+    window.addEventListener(WORKSPACE_STORAGE_UPDATED, reload);
+    return () => window.removeEventListener(WORKSPACE_STORAGE_UPDATED, reload);
+  }, []);
 
   useEffect(() => {
     fetch('/api/options')
@@ -57,7 +64,7 @@ export function TodayTasksApp() {
     () => buildInstances(data, date).filter((i) => i.staffName === staff),
     [data, date, staff],
   );
-  useTaskReminders(myList, tab === 'my');
+  useTaskReminders(myList, tab === 'workbench');
 
   const enableNoti = async () => {
     const p = await requestNotificationPermission();
@@ -112,10 +119,12 @@ export function TodayTasksApp() {
       </div>
 
       <div className="min-h-[320px]">
-        {tab === 'my' && <MyTodayPanel data={data} setData={setData} date={date} staff={staff} />}
+        {tab === 'workbench' && (
+          <TodayWorkbench data={data} setData={setData} date={date} staff={staff} roster={roster} />
+        )}
         {tab === 'tpl' && <TemplatesPanel data={data} setData={setData} />}
         {tab === 'asg' && <AssignmentsPanel data={data} setData={setData} roster={roster} />}
-        {tab === 'sup' && <SupervisorPanel data={data} date={date} />}
+        {tab === 'sup' && <SupervisorPanel data={data} setData={setData} date={date} />}
       </div>
     </div>
   );

@@ -89,3 +89,16 @@
     box-shadow: rgba(95, 99, 106, 0.08) 0px 0px 0px 1px, rgba(43, 43, 48, 0.1) 0px 1px 4px 0px;
   }
 }
+
+@layer utilities {
+  /* 可滚动但隐藏滚动条（侧栏、主内容区） */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}

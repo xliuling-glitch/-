@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { CsvTemplateUpload } from '@/components/csv-template-upload';
+import { formatAmountYuan } from '@/lib/format-amount';
 
 const CHANNELS = ['电话', '微信', '其他', '自定义'] as const;
 
@@ -52,17 +53,46 @@ export default function Page() {
   });
 
   const load = async () => {
-    setLeads(await (await fetch(`/api/leads?date=${date}`)).json());
-    setLogs(await (await fetch(`/api/followup-logs?date=${date}`)).json());
-    setActs(await (await fetch(`/api/daily-activity?date=${date}`)).json());
+    try {
+      const [lr, gr, ar] = await Promise.all([
+        fetch(`/api/leads?date=${encodeURIComponent(date)}`),
+        fetch(`/api/followup-logs?date=${encodeURIComponent(date)}`),
+        fetch(`/api/daily-activity?date=${encodeURIComponent(date)}`),
+      ]);
+      const safeJson = async (r: Response, fallback: unknown[]) => {
+        if (!r.ok) return fallback;
+        try {
+          return await r.json();
+        } catch {
+          return fallback;
+        }
+      };
+      setLeads(await safeJson(lr, []));
+      setLogs(await safeJson(gr, []));
+      setActs(await safeJson(ar, []));
+    } catch (e) {
+      console.error('[conversions] load failed', e);
+      setLeads([]);
+      setLogs([]);
+      setActs([]);
+    }
   };
 
   useEffect(() => {
-    load();
+    void load();
     fetch('/api/options')
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) return {};
+        try {
+          return await r.json();
+        } catch {
+          return {};
+        }
+      })
       .then((o) => {
-        setOpts(o);
+        if (o && typeof o === 'object') {
+          setOpts((prev) => ({ ...prev, ...o }));
+        }
         setLeadForm((v) => ({
           ...v,
           shop: o.shops?.[0] || v.shop,
@@ -165,16 +195,16 @@ export default function Page() {
 
       <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
         {[
-          ['线索', metrics.totalLeads],
-          ['跟进', metrics.totalF],
-          ['成交单', metrics.dealCnt],
-          ['成交额', metrics.dealAmt],
+          ['线索', String(metrics.totalLeads)],
+          ['跟进', String(metrics.totalF)],
+          ['成交单', String(metrics.dealCnt)],
+          ['成交额', formatAmountYuan(metrics.dealAmt)],
           ['转化率', `${metrics.conv.toFixed(2)}%`],
-          ['客单价', metrics.aov.toFixed(0)],
+          ['客单价', formatAmountYuan(metrics.aov)],
         ].map(([k, v]) => (
           <div key={String(k)} className="rounded-[10px] border border-[#f1f1f1] bg-white p-3">
             <div className="text-[#7e7d7b]">{k}</div>
-            <div className="font-bold text-[#1c1a17]">{String(v)}</div>
+            <div className="font-bold text-[#1c1a17]">{v}</div>
           </div>
         ))}
       </div>
@@ -382,6 +412,6 @@ export default function Page() {
           </p>
         </div>
       </div>
-    </div>
+  </div>
   );
 }

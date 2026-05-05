@@ -5,9 +5,13 @@ import { Card, Badge } from '@/components/ui';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import Link from 'next/link';
 import { DashboardSalesBoard } from '@/components/dashboard-sales-board';
+import { DashboardAdminAnalytics } from '@/components/dashboard-admin-analytics';
+import { formatAmountYuan } from '@/lib/format-amount';
 
 const modules = [
   { title: '今日任务中心', href: '/dashboard/tasks', icon: '📋', desc: '生成、查看和完成任务' },
+  { title: 'KPI每日上传中心', href: '/dashboard/kpi-daily', icon: '📤', desc: '日报表单、审核与任务联动' },
+  { title: '主管数据看板', href: '/dashboard/supervisor-board', icon: '📈', desc: '任务与KPI聚合、关注清单' },
   { title: '客户管理', href: '/dashboard/customers', icon: '👥', desc: '客户列表与详情' },
   { title: '客户跟进', href: '/dashboard/followups', icon: '📝', desc: '跟进记录管理' },
   { title: '电联管理', href: '/dashboard/calls', icon: '📞', desc: '通话记录与统计' },
@@ -16,7 +20,6 @@ const modules = [
   { title: '老客复购', href: '/dashboard/repurchase', icon: '🔄', desc: '复购提醒与追踪' },
   { title: '评价管理中心', href: '/dashboard/reviews', icon: '⭐', desc: '多店铺产品评价任务与审核' },
   { title: '朋友圈/视频号', href: '/dashboard/social', icon: '📱', desc: '社交平台运营' },
-  { title: '竞品假聊', href: '/dashboard/competitors', icon: '🕵️', desc: '竞品情报收集' },
   { title: '问题复盘', href: '/dashboard/problems', icon: '🔍', desc: '每日自我反思与明日计划' },
   { title: 'AI运用反馈', href: '/dashboard/scripts', icon: '🤖', desc: '品类询单、成交与 AI 使用登记' },
   { title: '排班管理', href: '/dashboard/schedules', icon: '📅', desc: '班次排班设置' },
@@ -84,6 +87,8 @@ export default function Home() {
         </Card>
       </div>
 
+      <DashboardAdminAnalytics />
+
       <DashboardSalesBoard />
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -124,13 +129,14 @@ export default function Home() {
             <ResponsiveContainer width="100%" height="86%">
               <BarChart data={data.salesRank}>
                 <XAxis dataKey="staff" tick={{ fill: '#5a5957', fontSize: 12 }} />
-                <YAxis tick={{ fill: '#5a5957', fontSize: 12 }} />
+                <YAxis tick={{ fill: '#5a5957', fontSize: 12 }} tickFormatter={(v) => formatAmountYuan(Number(v), 0)} />
                 <Tooltip
                   contentStyle={{
                     borderRadius: 10,
                     border: '1px solid #f1f1f1',
                     fontSize: 13,
                   }}
+                  formatter={(value: number) => [formatAmountYuan(value), '销售额']}
                 />
                 <Bar dataKey="amount" fill="#05933b" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -151,6 +157,7 @@ export default function Home() {
                     border: '1px solid #f1f1f1',
                     fontSize: 13,
                   }}
+                  formatter={(value: number) => formatAmountYuan(value)}
                 />
               </PieChart>
             </ResponsiveContainer>
