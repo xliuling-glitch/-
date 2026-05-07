@@ -78,7 +78,7 @@ export default function Page() {
           <strong className="text-[#1c1a17]">客户购买欲望</strong>、<strong className="text-[#1c1a17]">客户分类</strong>，以及四次电联各自的
           <strong className="text-[#1c1a17]">电联记录、截图、状态/未购买原因与状态备注</strong>。日志未填时，购买欲望/分类会尝试从同旺旺的<strong>线索主档</strong>带出。
           留资跟进表 CSV 批量导入请前往{' '}
-          <Link href="/dashboard/conversions" className="font-medium text-signal-violet underline">
+          <Link href="/dashboard/lead-follow" className="font-medium text-signal-violet underline">
             询单转化
           </Link>
           。
@@ -102,7 +102,7 @@ export default function Page() {
         <button type="button" className="btn-primary text-sm" onClick={load}>
           刷新
         </button>
-        <Link href="/dashboard/conversions" className="btn-ghost text-sm">
+        <Link href="/dashboard/lead-follow" className="btn-ghost text-sm">
           去询单转化录入
         </Link>
         <span className="text-xs text-[#969594]">

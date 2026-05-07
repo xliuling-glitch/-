@@ -4,9 +4,10 @@ export default function KpiDailyPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <div>
-        <h2 className="font-display text-xl font-bold tracking-tight text-coal-ink">KPI 每日上传中心</h2>
+        <h2 className="font-display text-xl font-bold tracking-tight text-coal-ink">每日 KPI 自动汇总与确认中心</h2>
         <p className="mt-1 text-sm text-slate-mid">
-          客服按日填报 AI、留资、电联、销售与评价等数据；提交后进入待审，仅「已通过」计入统计与主管看板。支持与「今日任务中心」KPI 任务联动。数据存本机 LocalStorage。
+          自动汇总日报、留资、抖音电联、评价、朋友圈、AI、老客户与复购等本地数据；客服核对备注后提交，主管审核。不在此重复填报业务字段。汇总存{' '}
+          <code className="rounded bg-ash px-1">daily_kpi_summary</code>，手工 KPI 历史仍在 <code className="rounded bg-ash px-1">kpi-daily-center-v1</code>。
         </p>
       </div>
       <KpiDailyUploadApp />

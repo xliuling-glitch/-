@@ -1,98 +1,60 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { KpiDailyAuditStatus, KpiDailySubmission } from '@/lib/kpi-daily/types';
-import { buildKpiAlerts, withDerivedMetrics } from '@/lib/kpi-daily/compute';
-import {
-  KPI_DAILY_CENTER_KEY,
-  getInitialKpiDailyCenter,
-  kpiSubmissionStatsForDate,
-  loadKpiDailyCenter,
-  normalizeKpiSubmission,
-  persistKpiDailyCenterIfDirty,
-} from '@/lib/kpi-daily/storage';
-import { kpiAuditToWorkflow } from '@/lib/kpi-daily/status-map';
-import { syncKpiSubmissionToTodayTasks } from '@/lib/kpi-daily/today-task-bridge';
-import { WORKSPACE_STORAGE_UPDATED } from '@/lib/workspace-events';
-import { KpiSubmissionDetailPanel } from '@/components/kpi-daily/KpiSubmissionDetailPanel';
-import { formatAmountYuan } from '@/lib/format-amount';
-import { WorkflowStatusBadge } from '@/components/workflow-status-badge';
 import { Card } from '@/components/ui';
+import { WorkflowStatusBadge } from '@/components/workflow-status-badge';
+import type { WorkflowStatusKey } from '@/lib/workflow-status';
+import { WORKSPACE_STORAGE_UPDATED } from '@/lib/workspace-events';
+import { LS_TODAY_CENTER_SHIFT } from '@/lib/shift-sop/storage-keys';
+import { formatAmountYuan } from '@/lib/format-amount';
+import type { DailyKpiFlowStatus, DailyKpiSummary, KpiManualAdjustment } from '@/lib/kpi-daily/daily-summary-types';
+import {
+  findSummary,
+  isoNow,
+  loadDailyKpiSummaryStore,
+  loadKpiManualAdjustments,
+  rid,
+  saveKpiManualAdjustments,
+  upsertSummary,
+} from '@/lib/kpi-daily/daily-summary-storage';
+import { aggregateKpiFromSources, applyApprovedManualAdjustments } from '@/lib/kpi-daily/aggregate-sources';
+import { syncDailyKpiSummaryToTodayTasks } from '@/lib/kpi-daily/summary-today-task-bridge';
 
-const AUDIT_OPTIONS: { v: KpiDailyAuditStatus | 'all'; label: string }[] = [
-  { v: 'all', label: '全部状态' },
-  { v: 'draft', label: '草稿' },
-  { v: 'pending_review', label: '待审核' },
-  { v: 'approved', label: '已通过' },
-  { v: 'rejected', label: '已驳回' },
+type SessionUser = { name: string; role: string } | null;
+
+const FLOW_LABEL: Record<DailyKpiFlowStatus, string> = {
+  pending_confirm: '待确认',
+  pending_review: '待审核',
+  approved: '已通过',
+  rejected: '已驳回',
+};
+
+function flowToWorkflow(s: DailyKpiFlowStatus): WorkflowStatusKey {
+  switch (s) {
+    case 'approved':
+      return 'completed';
+    case 'pending_review':
+      return 'pending_review';
+    case 'rejected':
+      return 'rejected';
+    default:
+      return 'incomplete';
+  }
+}
+
+const ADJUST_TYPES = [
+  { v: 'sales', label: '销售额补差' },
+  { v: 'lead', label: '留资数调整' },
+  { v: 'inquiry', label: '咨询量调整' },
+  { v: 'review_score', label: '评价计分调整' },
+  { v: 'ai_total', label: 'AI 合计调整' },
+  { v: 'other', label: '其他（说明必填）' },
 ];
-
-const TASK_TYPES = ['综合日报', '专项活动', '新店磨合', '大促复盘', '其他'];
-
-function rid() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `kpi-${Date.now()}`;
-}
-
-function newDraft(date: string, employeeName: string): KpiDailySubmission {
-  const id = rid();
-  const now = new Date().toISOString();
-  return normalizeKpiSubmission({
-    id,
-    date,
-    employeeName,
-    shift: 'day',
-    storeName: '',
-    taskType: '综合日报',
-    remark: '',
-    aiUseCount: 0,
-    aiScriptCount: 0,
-    aiCaseCount: 0,
-    aiRemark: '',
-    aiProofImages: [],
-    todayLeadCount: 0,
-    leadA: 0,
-    leadB: 0,
-    leadC: 0,
-    invalidLead: 0,
-    leadRemark: '',
-    shouldCallCount: 0,
-    calledCount: 0,
-    validCallCount: 0,
-    advancedCustomerCount: 0,
-    overdueFollowCount: 0,
-    callRemark: '',
-    orderCount: 0,
-    salesAmount: 0,
-    refundAmount: 0,
-    netSalesAmount: 0,
-    salesRemark: '',
-    textReviewCount: 0,
-    imageReviewCount: 0,
-    videoReviewCount: 0,
-    followReviewCount: 0,
-    reviewScoreCount: 0,
-    reviewRemark: '',
-    reviewProofImages: [],
-    proofImages: [],
-    aiTotalScore: 0,
-    highQualityLeadScore: 0,
-    callCompletionRate: null,
-    validCallRate: null,
-    effectiveReviewScore: 0,
-    auditStatus: 'draft',
-    rejectReason: '',
-    auditor: '',
-    managerRemark: '',
-    submittedAt: null,
-    createdAt: now,
-    updatedAt: now,
-  });
-}
 
 async function filesToDataUrls(files: File[], cap: number): Promise<string[]> {
   const out: string[] = [];
-  for (const f of files.slice(0, cap)) {
+  for (const f of Array.from(files).slice(0, cap)) {
     if (!f.type.startsWith('image/')) continue;
     const url = await new Promise<string>((resolve, reject) => {
       const fr = new FileReader();
@@ -101,60 +63,76 @@ async function filesToDataUrls(files: File[], cap: number): Promise<string[]> {
       fr.readAsDataURL(f);
     });
     out.push(url);
-    if (out.length >= cap) break;
   }
   return out;
 }
 
-type SessionUser = { name: string; role: string } | null;
+function emptySummary(date: string, employeeName: string, shift: 'day' | 'night'): DailyKpiSummary {
+  const t = isoNow();
+  const { data, sources, exceptions } = aggregateKpiFromSources(date, employeeName);
+  const merged = applyApprovedManualAdjustments(data, loadKpiManualAdjustments(), date, employeeName);
+  return {
+    id: rid(),
+    date,
+    employeeName,
+    shift,
+    flowStatus: 'pending_confirm',
+    sourceSummary: sources,
+    kpiDataSnapshot: merged,
+    exceptions,
+    employeeRemark: '',
+    keyCustomers: '',
+    todayIssues: '',
+    needManagerSupport: '',
+    auditor: '',
+    rejectReason: '',
+    submittedAt: null,
+    auditedAt: null,
+    createdAt: t,
+    updatedAt: t,
+    dataRefreshedAt: t,
+  };
+}
 
 export function KpiDailyUploadApp() {
-  const [filterDate, setFilterDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [filterStaff, setFilterStaff] = useState('');
-  const [filterAudit, setFilterAudit] = useState<KpiDailyAuditStatus | 'all'>('all');
-  const [filterShop, setFilterShop] = useState('');
-  const [filterTaskType, setFilterTaskType] = useState('');
-  const [submissions, setSubmissions] = useState<KpiDailySubmission[]>([]);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [staff, setStaff] = useState('');
   const [roster, setRoster] = useState<string[]>([]);
-  const [shops, setShops] = useState<string[]>([]);
   const [user, setUser] = useState<SessionUser>(null);
-  const [form, setForm] = useState<KpiDailySubmission>(() => newDraft(filterDate, ''));
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [viewRow, setViewRow] = useState<KpiDailySubmission | null>(null);
-  const [rejectRow, setRejectRow] = useState<KpiDailySubmission | null>(null);
-  const [rejectReasonInput, setRejectReasonInput] = useState('');
-  /** 避免首屏 submissions 仍为 [] 时写入空数据，并与 persist 去重配合打断 emit 自循环 */
-  const [storeReady, setStoreReady] = useState(false);
+  const [shift, setShift] = useState<'day' | 'night'>('day');
+  const [tick, setTick] = useState(0);
+  const [adjustments, setAdjustments] = useState<KpiManualAdjustment[]>([]);
+  const [rejectOpen, setRejectOpen] = useState<DailyKpiSummary | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [manualType, setManualType] = useState('sales');
+  const [manualValue, setManualValue] = useState('');
+  const [manualReason, setManualReason] = useState('');
+  const [manualNote, setManualNote] = useState('');
+  const [manualFiles, setManualFiles] = useState<FileList | null>(null);
+  const [draft, setDraft] = useState({
+    employeeRemark: '',
+    keyCustomers: '',
+    todayIssues: '',
+    needManagerSupport: '',
+  });
 
   const isSupervisor = user?.role === 'admin' || user?.role === 'manager';
 
-  useEffect(() => {
-    setSubmissions(getInitialKpiDailyCenter().submissions);
-    setStoreReady(true);
+  const reload = useCallback(() => {
+    setAdjustments(loadKpiManualAdjustments());
+    setTick((x) => x + 1);
   }, []);
 
   useEffect(() => {
-    const onWs = () => setSubmissions(loadKpiDailyCenter().submissions);
-    window.addEventListener(WORKSPACE_STORAGE_UPDATED, onWs);
-    return () => window.removeEventListener(WORKSPACE_STORAGE_UPDATED, onWs);
+    const s = typeof window !== 'undefined' ? localStorage.getItem(LS_TODAY_CENTER_SHIFT) : null;
+    if (s === 'night') setShift('night');
   }, []);
-
-  useEffect(() => {
-    if (!storeReady) return;
-    persistKpiDailyCenterIfDirty(submissions);
-  }, [submissions, storeReady]);
 
   useEffect(() => {
     fetch('/api/options')
       .then((r) => r.json())
-      .then((d) => {
-        setRoster(Array.isArray(d.staff_roster) ? d.staff_roster : []);
-        setShops(Array.isArray(d.shops) ? d.shops : []);
-      })
+      .then((d) => setRoster(Array.isArray(d.staff_roster) ? d.staff_roster : []))
       .catch(() => {});
-  }, []);
-
-  useEffect(() => {
     fetch('/api/session', { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => {
@@ -165,757 +143,611 @@ export function KpiDailyUploadApp() {
       .catch(() => setUser(null));
   }, []);
 
-  const stats = useMemo(() => {
-    const st = kpiSubmissionStatsForDate(submissions, filterDate, roster.length);
-    return st;
-  }, [submissions, filterDate, roster.length]);
-
-  const filteredList = useMemo(() => {
-    return submissions.filter((r) => {
-      if (r.date !== filterDate) return false;
-      if (filterStaff && r.employeeName !== filterStaff) return false;
-      if (filterAudit !== 'all' && r.auditStatus !== filterAudit) return false;
-      if (filterShop.trim() && !r.storeName.includes(filterShop.trim())) return false;
-      if (filterTaskType.trim() && !r.taskType.includes(filterTaskType.trim())) return false;
-      return true;
-    });
-  }, [submissions, filterDate, filterStaff, filterAudit, filterShop, filterTaskType]);
-
-  const topAlerts = useMemo(() => {
-    const lines: string[] = [];
-    if (!filterStaff || !roster.includes(filterStaff)) return lines;
-    const mine = submissions.filter((s) => s.date === filterDate && s.employeeName === filterStaff);
-    const hasNonDraft = mine.some((s) => s.auditStatus !== 'draft');
-    if (mine.length === 0) {
-      lines.push(`${filterStaff} 在 ${filterDate} 尚未上传 KPI 日报。`);
-    } else if (!hasNonDraft) {
-      lines.push(`${filterStaff} 有草稿尚未提交审核。`);
-    }
-    for (const r of mine) {
-      lines.push(...buildKpiAlerts(r));
-    }
-    return [...new Set(lines)].slice(0, 10);
-  }, [submissions, filterDate, filterStaff, roster]);
-
-  const upsert = useCallback((r: KpiDailySubmission) => {
-    const next = normalizeKpiSubmission({ ...r, updatedAt: new Date().toISOString() });
-    setSubmissions((list) => {
-      const i = list.findIndex((x) => x.id === next.id);
-      if (i >= 0) {
-        const cp = [...list];
-        cp[i] = next;
-        return cp;
-      }
-      return [next, ...list];
-    });
-    return next;
+  useEffect(() => {
+    setAdjustments(loadKpiManualAdjustments());
   }, []);
 
-  const applyFormDerived = useCallback((f: KpiDailySubmission) => normalizeKpiSubmission(withDerivedMetrics(f) as KpiDailySubmission), []);
-
-  const setFormField = <K extends keyof KpiDailySubmission>(key: K, value: KpiDailySubmission[K]) => {
-    setForm((prev) => applyFormDerived({ ...prev, [key]: value }));
-  };
-
-  const onPickImages = async (field: 'aiProofImages' | 'reviewProofImages', e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    e.target.value = '';
-    if (!files?.length) return;
-    const add = await filesToDataUrls([...files], 6);
-    setForm((prev) =>
-      applyFormDerived({
-        ...prev,
-        [field]: [...(prev[field] as string[]), ...add].slice(0, 8),
-      }),
-    );
-  };
-
-  const resetForm = () => {
-    const name = !isSupervisor && user?.name ? user.name : '';
-    setForm(newDraft(filterDate, name));
-    setEditingId(null);
-  };
+  useEffect(() => {
+    const fn = () => reload();
+    window.addEventListener(WORKSPACE_STORAGE_UPDATED, fn);
+    return () => window.removeEventListener(WORKSPACE_STORAGE_UPDATED, fn);
+  }, [reload]);
 
   useEffect(() => {
-    if (editingId) return;
-    if (user?.name && !isSupervisor) {
-      setForm((f) => applyFormDerived({ ...f, employeeName: user.name }));
+    if (!staff && roster.length && user?.name && !isSupervisor) {
+      setStaff(user.name);
     }
-  }, [user, isSupervisor, editingId, applyFormDerived]);
+  }, [staff, roster, user, isSupervisor]);
 
-  const canEditRecord = (r: KpiDailySubmission) => {
-    if (isSupervisor) return true;
-    if (!user?.name) return true;
-    return r.employeeName === user.name;
-  };
+  const summaries = useMemo(() => loadDailyKpiSummaryStore().summaries, [tick]);
 
-  const saveDraft = () => {
-    const f = applyFormDerived({ ...form, auditStatus: 'draft', submittedAt: null });
-    if (!f.employeeName.trim()) {
-      window.alert('请填写客服姓名');
-      return;
+  useEffect(() => {
+    if (!staff) return;
+    const ex = findSummary(date, staff);
+    if (!ex) {
+      upsertSummary(emptySummary(date, staff, shift));
+      reload();
     }
-    if (!f.storeName.trim()) {
-      window.alert('请选择或填写所属店铺');
-      return;
+  }, [date, staff, shift, reload]);
+
+  const summary = staff ? findSummary(date, staff) : undefined;
+
+  useEffect(() => {
+    if (!summary) return;
+    setDraft({
+      employeeRemark: summary.employeeRemark,
+      keyCustomers: summary.keyCustomers,
+      todayIssues: summary.todayIssues,
+      needManagerSupport: summary.needManagerSupport,
+    });
+  }, [summary?.id, summary?.flowStatus]);
+
+  const agg = useMemo(() => (staff ? aggregateKpiFromSources(date, staff) : null), [date, staff, tick]);
+  const mergedLive = useMemo(() => {
+    if (!staff || !agg) return null;
+    return applyApprovedManualAdjustments(agg.data, adjustments, date, staff);
+  }, [agg, adjustments, date, staff]);
+
+  const displayKpi = useMemo(() => {
+    if (!summary || !mergedLive) return mergedLive;
+    if (summary.flowStatus === 'pending_review' || summary.flowStatus === 'approved') {
+      return summary.kpiDataSnapshot;
     }
-    upsert(f);
-    window.alert('已保存草稿');
-    resetForm();
+    return mergedLive;
+  }, [summary, mergedLive]);
+
+  const saveNotes = () => {
+    const cur = findSummary(date, staff);
+    if (!cur) return;
+    upsertSummary({ ...cur, ...draft, updatedAt: isoNow() });
+    reload();
   };
 
   const submitForReview = () => {
-    let f = applyFormDerived({
-      ...form,
-      auditStatus: 'pending_review',
-      submittedAt: new Date().toISOString(),
+    const cur = findSummary(date, staff);
+    if (!cur || !mergedLive) return;
+    upsertSummary({
+      ...cur,
+      ...draft,
+      flowStatus: 'pending_review',
+      kpiDataSnapshot: mergedLive,
+      submittedAt: isoNow(),
+      rejectReason: '',
+      dataRefreshedAt: isoNow(),
+      updatedAt: isoNow(),
+    });
+    reload();
+    syncDailyKpiSummaryToTodayTasks({ employeeName: staff, date, flowStatus: 'pending_review' });
+  };
+
+  const supervisorApprove = (row: DailyKpiSummary) => {
+    const auditor = user?.name ?? '主管';
+    upsertSummary({
+      ...row,
+      flowStatus: 'approved',
+      auditor,
+      auditedAt: isoNow(),
+      updatedAt: isoNow(),
       rejectReason: '',
     });
-    if (!f.employeeName.trim()) {
-      window.alert('请填写客服姓名');
-      return;
-    }
-    if (!isSupervisor && user?.name && f.employeeName !== user.name) {
-      window.alert('只能以自己的名义提交');
-      return;
-    }
-    if (!f.storeName.trim()) {
-      window.alert('请选择或填写所属店铺');
-      return;
-    }
-    f =     upsert(f);
-    syncKpiSubmissionToTodayTasks({ employeeName: f.employeeName, date: f.date, auditStatus: 'pending_review' });
-    window.alert('已提交审核，状态为「待审核」；已与「今日任务中心」KPI 任务同步。');
-    resetForm();
+    reload();
+    syncDailyKpiSummaryToTodayTasks({ employeeName: row.employeeName, date: row.date, flowStatus: 'approved' });
   };
 
-  const startEdit = (r: KpiDailySubmission) => {
-    if (!canEditRecord(r) && !isSupervisor) {
-      window.alert('无权编辑他人数据');
+  const supervisorReject = () => {
+    if (!rejectOpen || !rejectReason.trim()) return;
+    upsertSummary({
+      ...rejectOpen,
+      flowStatus: 'rejected',
+      auditor: user?.name ?? '主管',
+      auditedAt: isoNow(),
+      rejectReason: rejectReason.trim(),
+      updatedAt: isoNow(),
+    });
+    reload();
+    syncDailyKpiSummaryToTodayTasks({
+      employeeName: rejectOpen.employeeName,
+      date: rejectOpen.date,
+      flowStatus: 'rejected',
+      rejectReason: rejectReason.trim(),
+    });
+    setRejectOpen(null);
+    setRejectReason('');
+  };
+
+  const addManualAdjustment = async () => {
+    if (!staff) return;
+    const v = Number(manualValue);
+    if (!manualReason.trim()) {
+      window.alert('请填写补录原因');
       return;
     }
-    setEditingId(r.id);
-    setForm(normalizeKpiSubmission({ ...r }));
-  };
-
-  const saveEdit = () => {
-    if (!editingId) return;
-    const prev = submissions.find((x) => x.id === editingId);
-    if (!prev) return;
-    const f = applyFormDerived({ ...form, id: editingId, createdAt: prev.createdAt });
-    upsert(f);
-    if (f.auditStatus === 'pending_review') {
-      syncKpiSubmissionToTodayTasks({ employeeName: f.employeeName, date: f.date, auditStatus: 'pending_review' });
+    const proofs = manualFiles?.length ? await filesToDataUrls(Array.from(manualFiles), 6) : [];
+    if (!proofs.length) {
+      window.alert('手动补录需上传凭证截图');
+      return;
     }
-    if (f.auditStatus === 'approved') {
-      syncKpiSubmissionToTodayTasks({ employeeName: f.employeeName, date: f.date, auditStatus: 'approved' });
-    }
-    if (f.auditStatus === 'rejected') {
-      syncKpiSubmissionToTodayTasks({
-        employeeName: f.employeeName,
-        date: f.date,
-        auditStatus: 'rejected',
-        rejectReason: f.rejectReason,
-      });
-    }
-    resetForm();
-  };
-
-  const resubmitAfterReject = () => {
-    if (!editingId) return;
-    const prev = submissions.find((x) => x.id === editingId);
-    if (!prev || prev.auditStatus !== 'rejected') return;
-    const f = applyFormDerived({
-      ...form,
-      id: editingId,
-      createdAt: prev.createdAt,
+    const row: KpiManualAdjustment = {
+      id: rid(),
+      date,
+      employeeName: staff,
+      adjustType: manualType,
+      value: Number.isFinite(v) ? v : 0,
+      reason: manualReason.trim(),
+      proofImages: proofs,
+      note: manualNote.trim(),
       auditStatus: 'pending_review',
+      auditor: '',
       rejectReason: '',
-      submittedAt: new Date().toISOString(),
-    });
-    upsert(f);
-    syncKpiSubmissionToTodayTasks({ employeeName: f.employeeName, date: f.date, auditStatus: 'pending_review' });
-    window.alert('已重新提交审核');
-    resetForm();
+      createdAt: isoNow(),
+      updatedAt: isoNow(),
+    };
+    saveKpiManualAdjustments([...adjustments, row]);
+    setManualValue('');
+    setManualReason('');
+    setManualNote('');
+    setManualFiles(null);
+    reload();
   };
 
-  const approveRow = (r: KpiDailySubmission) => {
-    if (!isSupervisor) return;
-    const auditor = user?.name || '主管';
-    const next = normalizeKpiSubmission({
-      ...r,
-      auditStatus: 'approved',
-      auditor,
-      updatedAt: new Date().toISOString(),
-    });
-    upsert(next);
-    syncKpiSubmissionToTodayTasks({ employeeName: next.employeeName, date: next.date, auditStatus: 'approved' });
-    window.alert('已通过');
-  };
-
-  const openReject = (r: KpiDailySubmission) => {
-    setRejectRow(r);
-    setRejectReasonInput(r.rejectReason || '');
-  };
-
-  const confirmReject = () => {
-    if (!rejectRow) return;
-    if (!rejectReasonInput.trim()) {
-      window.alert('请填写驳回原因');
-      return;
-    }
-    const auditor = user?.name || '主管';
-    const next = normalizeKpiSubmission({
-      ...rejectRow,
-      auditStatus: 'rejected',
-      rejectReason: rejectReasonInput.trim(),
-      auditor,
-      updatedAt: new Date().toISOString(),
-    });
-    upsert(next);
-    syncKpiSubmissionToTodayTasks({
-      employeeName: next.employeeName,
-      date: next.date,
-      auditStatus: 'rejected',
-      rejectReason: rejectReasonInput.trim(),
-    });
-    setRejectRow(null);
-    window.alert('已驳回');
-  };
-
-  const removeRow = (r: KpiDailySubmission) => {
-    if (!isSupervisor && (!user?.name || r.employeeName !== user.name)) {
-      window.alert('仅能删除本人草稿或未提交数据');
-      return;
-    }
-    if (r.auditStatus !== 'draft' && !isSupervisor) {
-      window.alert('仅草稿可由本人删除；其他状态请联系主管');
-      return;
-    }
-    if (!window.confirm('确定删除该条记录？')) return;
-    setSubmissions((list) => list.filter((x) => x.id !== r.id));
-  };
-
-  const derivedBar = useMemo(() => {
-    const d = withDerivedMetrics(form);
-    return (
-      <div className="grid gap-2 rounded-lg border border-ash bg-white/80 p-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-        <div>
-          <span className="text-xs text-graphite">AI 合计分</span>
-          <div className="font-display text-xl font-bold text-coal-ink tabular-nums">{d.aiTotalScore}</div>
-        </div>
-        <div>
-          <span className="text-xs text-graphite">高质量留资分</span>
-          <div className="font-display text-xl font-bold text-emerald-800 tabular-nums">{d.highQualityLeadScore.toFixed(2)}</div>
-        </div>
-        <div>
-          <span className="text-xs text-graphite">电联完成率 / 有效电联率</span>
-          <div className="font-display text-xl font-bold text-sky-800 tabular-nums">
-            {d.callCompletionRate != null ? `${d.callCompletionRate}%` : '—'} / {d.validCallRate != null ? `${d.validCallRate}%` : '—'}
-          </div>
-        </div>
-        <div>
-          <span className="text-xs text-graphite">净销售额</span>
-          <div className="font-display text-xl font-bold text-amber-900 tabular-nums">{formatAmountYuan(d.netSalesAmount)}</div>
-        </div>
-        <div>
-          <span className="text-xs text-graphite">有效评价计数</span>
-          <div className="font-display text-xl font-bold text-violet-800 tabular-nums">{d.effectiveReviewScore.toFixed(2)}</div>
-        </div>
-      </div>
+  const approveAdjustment = (row: KpiManualAdjustment) => {
+    const next = adjustments.map((a) =>
+      a.id === row.id ? { ...a, auditStatus: 'approved' as const, auditor: user?.name ?? '主管', updatedAt: isoNow() } : a,
     );
-  }, [form]);
+    saveKpiManualAdjustments(next);
+    reload();
+  };
+
+  const rejectAdjustment = (row: KpiManualAdjustment, reason: string) => {
+    if (!reason.trim()) return;
+    const next = adjustments.map((a) =>
+      a.id === row.id
+        ? { ...a, auditStatus: 'rejected' as const, auditor: user?.name ?? '主管', rejectReason: reason.trim(), updatedAt: isoNow() }
+        : a,
+    );
+    saveKpiManualAdjustments(next);
+    reload();
+  };
+
+  const daySummaries = summaries.filter((s) => s.date === date);
+  const pendingAdj = adjustments.filter((a) => a.date === date && a.auditStatus === 'pending_review');
+
+  const syncRows = [
+    {
+      name: '日报/询单量登记',
+      ok: agg?.sources.inquiryReportSynced,
+      blurb: agg?.sourceBlurbs.inquiry ?? '—',
+      href: `/dashboard/lead-follow?tab=daily&date=${date}`,
+      abnormal: agg?.exceptions.some((e) => e.includes('咨询量')) ?? false,
+    },
+    {
+      name: '留资跟进表',
+      ok: agg?.sources.leadFollowSynced,
+      blurb: agg?.sourceBlurbs.lead ?? '—',
+      href: `/dashboard/lead-follow?tab=today&date=${date}`,
+      abnormal: agg?.exceptions.some((e) => e.includes('留资跟进')) ?? false,
+    },
+    {
+      name: '抖音留资电联',
+      ok: agg?.sources.douyinLeadSynced,
+      blurb: agg?.sourceBlurbs.douyin ?? '—',
+      href: `/dashboard/lead-follow?tab=douyin&date=${date}`,
+      abnormal: agg?.exceptions.some((e) => e.includes('抖音')) ?? false,
+    },
+    {
+      name: '评价管理',
+      ok: agg?.sources.reviewSynced,
+      blurb: agg?.sourceBlurbs.review ?? '—',
+      href: '/dashboard/reviews',
+      abnormal: agg?.exceptions.some((e) => e.includes('评价')) ?? false,
+    },
+    {
+      name: '朋友圈/视频号',
+      ok: agg?.sources.socialPostSynced,
+      blurb: agg?.sourceBlurbs.social ?? '—',
+      href: '/dashboard/tasks',
+      abnormal: agg?.exceptions.some((e) => e.includes('朋友圈')) ?? false,
+    },
+    {
+      name: 'AI运用反馈',
+      ok: agg?.sources.aiUsageSynced,
+      blurb: agg?.sourceBlurbs.ai ?? '—',
+      href: '/dashboard/tasks',
+      abnormal: agg?.exceptions.some((e) => e.includes('AI')) ?? false,
+    },
+    {
+      name: '老客户CRM',
+      ok: agg?.sources.oldCustomerSynced,
+      blurb: agg?.sourceBlurbs.crm ?? '—',
+      href: '/dashboard/old-customer-crm',
+      abnormal: agg?.exceptions.some((e) => e.includes('老客户')) ?? false,
+    },
+    {
+      name: '复购跟踪',
+      ok: agg?.sources.repurchaseSynced,
+      blurb: agg?.sourceBlurbs.repurchase ?? '—',
+      href: '/dashboard/old-customer-crm',
+      abnormal: false,
+    },
+  ];
+
+  const kpiRows = displayKpi
+    ? [
+        ['咨询量', String(displayKpi.inquiryCount), '日报 inquiryCount 合计', 'daily_inquiry_reports', '自动'],
+        ['留资数', String(displayKpi.leadCount), '有效留资（电话/微信/已加微），同日去重', 'lead_follow_records', '自动'],
+        ['留资率', displayKpi.leadRatePct != null ? `${displayKpi.leadRatePct}%` : '—', '留资数/咨询量', '计算', '自动'],
+        ['电联完成率', displayKpi.callCompletionRatePct != null ? `${displayKpi.callCompletionRatePct}%` : '—', '抖音已电联/抖音留资条数', 'douyin_lead_follow_records', '自动'],
+        ['有效电联率', displayKpi.validCallRatePct != null ? `${displayKpi.validCallRatePct}%` : '—', '电联管理接通数/已电联（抖音）', 'call_follow + 抖音', '自动'],
+        ['销售额', formatAmountYuan(displayKpi.salesAmount), '优先日报 dailySalesAmount，否则留资成交合计', 'daily_inquiry_reports / lead_follow_records', '自动'],
+        ['评价计分', displayKpi.reviewScoreEffective.toFixed(1), '文×1 + 图×1.5 + 视频×2 + 追评×1（已完成且未驳回）', 'review_register_records', '自动'],
+        ['朋友圈发布', String(displayKpi.momentsPostCount), '社交 LS 或工作包朋友圈任务', 'social_post_records / daily_work_packages', '自动'],
+        ['AI使用合计', String(displayKpi.aiUseTotal), '次数×1+话术×2+案例×3', 'ai_usage_records', '自动'],
+        ['老客户回访率', displayKpi.oldCustomerFollowRatePct != null ? `${displayKpi.oldCustomerFollowRatePct}%` : '—', '已完成/当日任务数', 'old_customer_follow_tasks', '自动'],
+      ]
+    : [];
 
   return (
     <div className="space-y-5">
-      {topAlerts.length > 0 ? (
-        <div className="rounded-[10px] border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <strong className="block text-xs font-semibold uppercase tracking-wide text-amber-900">异常 / 提醒</strong>
-          <ul className="mt-2 list-inside list-disc space-y-1">
-            {topAlerts.map((t) => (
-              <li key={t}>{t}</li>
+      <div className="flex flex-wrap items-end gap-3 rounded-[10px] border border-ash bg-ledger-white p-3">
+        <label className="text-xs text-graphite">
+          业务日
+          <input type="date" className="input-field mt-1 block text-sm" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-graphite">
+          客服
+          <select className="input-field mt-1 block min-w-[8rem] text-sm" value={staff} onChange={(e) => setStaff(e.target.value)}>
+            <option value="">请选择</option>
+            {roster.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
-          </ul>
-        </div>
-      ) : null}
+          </select>
+        </label>
+        {isSupervisor ? (
+          <p className="text-xs text-slate-mid sm:ml-auto">主管可审核当日汇总；客服需在名单中。</p>
+        ) : (
+          <p className="text-xs text-slate-mid sm:ml-auto">当前账号：{user?.name ?? '…'}</p>
+        )}
+      </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {[
-          ['今日应上传人数', stats.expected, 'text-coal-ink'],
-          ['已上传人数', stats.uploaded, 'text-emerald-700'],
-          ['未上传人数', stats.notUploaded, 'text-stone'],
-          ['待审核记录', stats.pending, 'text-amber-800'],
-          ['已通过', stats.approved, 'text-emerald-800'],
-          ['已驳回', stats.rejected, 'text-rose-800'],
-        ].map(([label, val, cls]) => (
-          <Card key={String(label)} elevated className="p-4">
-            <div className="text-xs text-slate-mid">{label}</div>
-            <div className={`mt-1 font-display text-2xl font-bold tabular-nums ${cls}`}>{val}</div>
+      {!staff ? (
+        <p className="text-sm text-slate-mid">请选择客服姓名。</p>
+      ) : (
+        <>
+          {/* 顶部信息 */}
+          <Card className="border border-ash p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-base font-semibold text-coal-ink">汇总状态</h3>
+                <p className="mt-1 text-xs text-slate-mid">
+                  数据由当日各模块 LocalStorage 自动汇总；提交后锁定快照待主管审核。旧版手工 KPI 仍保存在 <code className="rounded bg-ash px-1">kpi-daily-center-v1</code>，本页不再逐项手填。
+                </p>
+              </div>
+              <div className="text-right text-sm">
+                <div className="flex items-center justify-end gap-2">
+                  <span className="text-graphite">流程：</span>
+                  <WorkflowStatusBadge status={flowToWorkflow(summary?.flowStatus ?? 'pending_confirm')} />
+                  <span className="font-medium text-coal-ink">{FLOW_LABEL[summary?.flowStatus ?? 'pending_confirm']}</span>
+                </div>
+                <p className="mt-1 text-xs text-stone">
+                  班次：{shift === 'day' ? '白班' : '晚班'} · 更新时间 {summary?.dataRefreshedAt?.slice(0, 19).replace('T', ' ') ?? '—'}
+                </p>
+              </div>
+            </div>
           </Card>
-        ))}
-      </div>
 
-      <div className="rounded-[10px] border border-ash bg-ledger-white p-4">
-        <h3 className="text-sm font-semibold text-coal-ink">筛选</h3>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <label className="text-xs text-graphite">
-            日期
-            <input type="date" className="input-field mt-1 block w-full text-sm" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} />
-          </label>
-          <label className="text-xs text-graphite">
-            客服
-            <select className="input-field mt-1 block w-full text-sm" value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)}>
-              <option value="">全部</option>
-              {roster.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-graphite">
-            审核状态
-            <select className="input-field mt-1 block w-full text-sm" value={filterAudit} onChange={(e) => setFilterAudit(e.target.value as KpiDailyAuditStatus | 'all')}>
-              {AUDIT_OPTIONS.map((o) => (
-                <option key={o.v} value={o.v}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-graphite">
-            店铺
-            <input className="input-field mt-1 block w-full text-sm" value={filterShop} onChange={(e) => setFilterShop(e.target.value)} placeholder="关键字" />
-          </label>
-          <label className="text-xs text-graphite">
-            任务类型
-            <input className="input-field mt-1 block w-full text-sm" value={filterTaskType} onChange={(e) => setFilterTaskType(e.target.value)} placeholder="关键字" />
-          </label>
-        </div>
-        <p className="mt-2 text-xs text-stone">
-          数据保存在 LocalStorage（<code className="rounded bg-ash px-1">{KPI_DAILY_CENTER_KEY}</code>，别名 daily_kpi_uploads）。提交后为「待审核」；仅「已通过」计入主管看板今日统计。任务类型为「KPI上传」的今日任务在提交 KPI 后自动闭环。
-          {isSupervisor ? <span className="ml-2 text-emerald-800">当前为管理/主管身份，可审核全部记录。</span> : null}
-        </p>
-      </div>
-
-      <Card elevated className="p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ash pb-3">
-          <h3 className="font-display text-base font-bold text-coal-ink">{editingId ? '编辑 KPI 日报' : '新建 KPI 日报'}</h3>
-          <button type="button" className="btn-ghost text-sm" onClick={resetForm}>
-            清空表单
-          </button>
-        </div>
-        <div className="mt-4 space-y-4">
-          <section>
-            <h4 className="text-xs font-bold uppercase tracking-wide text-graphite">基础信息</h4>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <label className="text-xs text-graphite">
-                日期
-                <input type="date" className="input-field mt-1 block w-full text-sm" value={form.date} onChange={(e) => setFormField('date', e.target.value)} />
-              </label>
-              <label className="text-xs text-graphite">
-                客服姓名
-                <select
-                  className="input-field mt-1 block w-full text-sm"
-                  value={form.employeeName}
-                  disabled={!isSupervisor && !!user?.name}
-                  onChange={(e) => setFormField('employeeName', e.target.value)}
-                >
-                  <option value="">请选择</option>
-                  {roster.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
+          {/* 同步状态 */}
+          <Card className="border border-ash p-4">
+            <h3 className="font-display text-base font-semibold text-coal-ink">数据来源同步状态</h3>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-[720px] w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-ash bg-ash/40 text-left text-xs text-graphite">
+                    <th className="px-2 py-2">模块</th>
+                    <th className="px-2 py-2">已同步</th>
+                    <th className="px-2 py-2">摘要</th>
+                    <th className="px-2 py-2">异常</th>
+                    <th className="px-2 py-2">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncRows.map((r) => (
+                    <tr key={r.name} className="border-b border-ash/80">
+                      <td className="px-2 py-2">{r.name}</td>
+                      <td className="px-2 py-2">{r.ok ? <span className="text-emerald-700">是</span> : <span className="text-stone">否</span>}</td>
+                      <td className="px-2 py-2 text-xs text-graphite">{r.blurb}</td>
+                      <td className="px-2 py-2">{r.abnormal ? <span className="text-amber-800">有</span> : <span className="text-stone">无</span>}</td>
+                      <td className="px-2 py-2 whitespace-nowrap">
+                        <Link href={r.href} className="text-sky-800 underline text-xs">
+                          去补录
+                        </Link>
+                      </td>
+                    </tr>
                   ))}
-                </select>
-                {!isSupervisor && user?.name ? <span className="mt-1 block text-[10px] text-stone">已锁定为当前登录用户</span> : null}
-              </label>
-              <label className="text-xs text-graphite">
-                班次
-                <select className="input-field mt-1 block w-full text-sm" value={form.shift} onChange={(e) => setFormField('shift', e.target.value as 'day' | 'night')}>
-                  <option value="day">白班</option>
-                  <option value="night">晚班</option>
-                </select>
-              </label>
-              <label className="text-xs text-graphite">
-                所属店铺
-                <input className="input-field mt-1 block w-full text-sm" list="kpi-shop-list" value={form.storeName} onChange={(e) => setFormField('storeName', e.target.value)} />
-                <datalist id="kpi-shop-list">
-                  {shops.map((s) => (
-                    <option key={s} value={s} />
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* KPI 表 */}
+          <Card className="border border-ash p-4">
+            <h3 className="font-display text-base font-semibold text-coal-ink">KPI 自动汇总</h3>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-[800px] w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-ash bg-ash/40 text-left text-xs text-graphite">
+                    <th className="px-2 py-2">项目</th>
+                    <th className="px-2 py-2">数值</th>
+                    <th className="px-2 py-2">计算方式</th>
+                    <th className="px-2 py-2">来源</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kpiRows.map(([a, b, c, d]) => (
+                    <tr key={String(a)} className="border-b border-ash/80">
+                      <td className="px-2 py-2 font-medium">{a}</td>
+                      <td className="px-2 py-2 tabular-nums">{b}</td>
+                      <td className="px-2 py-2 text-xs text-graphite">{c}</td>
+                      <td className="px-2 py-2 text-xs text-stone">{d}</td>
+                    </tr>
                   ))}
-                </datalist>
-              </label>
-              <label className="text-xs text-graphite">
-                任务类型
-                <select className="input-field mt-1 block w-full text-sm" value={form.taskType} onChange={(e) => setFormField('taskType', e.target.value)}>
-                  {TASK_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-xs text-graphite sm:col-span-2 lg:col-span-3">
-                备注
-                <input className="input-field mt-1 block w-full text-sm" value={form.remark} onChange={(e) => setFormField('remark', e.target.value)} />
-              </label>
+                </tbody>
+              </table>
             </div>
-          </section>
+            <p className="mt-2 text-[11px] text-slate-mid">
+              复购：金额 {displayKpi ? formatAmountYuan(displayKpi.repurchaseAmount) : '—'} · 机会 {displayKpi?.repurchaseOpportunityCount ?? '—'} · 已复购{' '}
+              {displayKpi?.repurchaseDoneCount ?? '—'}（repurchase_opportunities）
+            </p>
+          </Card>
 
-          <section className="rounded-lg border border-ash/80 bg-[#fafafa] p-3">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-graphite">AI 智能体运用</h4>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="text-xs text-graphite">
-                AI 使用次数
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.aiUseCount} onChange={(e) => setFormField('aiUseCount', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                AI 优化话术数量
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.aiScriptCount} onChange={(e) => setFormField('aiScriptCount', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                AI 案例沉淀数量
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.aiCaseCount} onChange={(e) => setFormField('aiCaseCount', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite sm:col-span-2 lg:col-span-4">
-                AI 使用说明
-                <textarea className="input-field mt-1 min-h-[4rem] w-full text-sm" value={form.aiRemark} onChange={(e) => setFormField('aiRemark', e.target.value)} />
-              </label>
-              <div className="sm:col-span-2 lg:col-span-4">
-                <span className="text-xs text-graphite">AI 使用截图 / 案例截图</span>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <label className="btn-ghost cursor-pointer text-xs">
-                    选择图片
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onPickImages('aiProofImages', e)} />
-                  </label>
-                  <span className="text-[10px] text-stone">本地预览（data URL），最多 8 张</span>
-                </div>
-                {form.aiProofImages.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {form.aiProofImages.map((src, i) => (
-                      <div key={i} className="relative h-16 w-16 overflow-hidden rounded border border-ash bg-white">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={src} alt="" className="h-full w-full object-cover" />
-                        <button
-                          type="button"
-                          className="absolute right-0 top-0 rounded-bl bg-black/60 px-1 text-[10px] text-white"
-                          onClick={() =>
-                            setForm((prev) =>
-                              applyFormDerived({ ...prev, aiProofImages: prev.aiProofImages.filter((_, j) => j !== i) }),
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-ash/80 bg-[#fafafa] p-3">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-graphite">高质量留资</h4>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <label className="text-xs text-graphite">
-                今日留资数量
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.todayLeadCount} onChange={(e) => setFormField('todayLeadCount', Number(e.target.value))} />
-                <span className="mt-1 block text-[10px] text-stone">留 0 则列表按 A+B+C+无效 自动合计展示</span>
-              </label>
-              <label className="text-xs text-graphite">
-                A 类留资
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.leadA} onChange={(e) => setFormField('leadA', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                B 类留资
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.leadB} onChange={(e) => setFormField('leadB', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                C 类留资
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.leadC} onChange={(e) => setFormField('leadC', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                无效留资
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.invalidLead} onChange={(e) => setFormField('invalidLead', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite sm:col-span-2 lg:col-span-3">
-                留资客户备注
-                <textarea className="input-field mt-1 min-h-[3.5rem] w-full text-sm" value={form.leadRemark} onChange={(e) => setFormField('leadRemark', e.target.value)} />
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-ash/80 bg-[#fafafa] p-3">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-graphite">电联追单</h4>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {(
-                [
-                  ['应电联客户数', 'shouldCallCount'],
-                  ['已电联客户数', 'calledCount'],
-                  ['有效电联数', 'validCallCount'],
-                  ['推进客户数', 'advancedCustomerCount'],
-                  ['逾期未跟进数', 'overdueFollowCount'],
-                ] as const
-              ).map(([label, key]) => (
-                <label key={key} className="text-xs text-graphite">
-                  {label}
-                  <input
-                    type="number"
-                    min={0}
-                    className="input-field mt-1 block w-full text-sm tabular-nums"
-                    value={form[key]}
-                    onChange={(e) => setFormField(key, Number(e.target.value))}
-                  />
-                </label>
+          {/* 异常 */}
+          <Card className="border border-amber-200 bg-amber-50/50 p-4">
+            <h3 className="font-display text-base font-semibold text-amber-950">异常提醒</h3>
+            <ul className="mt-2 list-inside list-disc text-sm text-amber-950">
+              {(agg?.exceptions.length ? agg.exceptions : ['暂无自动检测到的问题']).map((e, i) => (
+                <li key={i}>{e}</li>
               ))}
-              <label className="text-xs text-graphite sm:col-span-2 lg:col-span-3">
-                电联备注
-                <textarea className="input-field mt-1 min-h-[3.5rem] w-full text-sm" value={form.callRemark} onChange={(e) => setFormField('callRemark', e.target.value)} />
-              </label>
-            </div>
-          </section>
+            </ul>
+          </Card>
 
-          <section className="rounded-lg border border-ash/80 bg-[#fafafa] p-3">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-graphite">销售额</h4>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="text-xs text-graphite">
-                当日成交订单数
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.orderCount} onChange={(e) => setFormField('orderCount', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                当日销售额
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.salesAmount} onChange={(e) => setFormField('salesAmount', Number(e.target.value))} />
-              </label>
-              <label className="text-xs text-graphite">
-                退款金额
-                <input type="number" min={0} className="input-field mt-1 block w-full text-sm tabular-nums" value={form.refundAmount} onChange={(e) => setFormField('refundAmount', Number(e.target.value))} />
-              </label>
-              <div className="text-xs text-graphite">
-                净销售额（自动）
-                <div className="input-field mt-1 bg-ash/40 font-display text-lg font-bold tabular-nums text-coal-ink">
-                  {formatAmountYuan(withDerivedMetrics(form).netSalesAmount)}
-                </div>
-              </div>
-              <label className="text-xs text-graphite sm:col-span-2 lg:col-span-4">
-                重点成交客户备注
-                <textarea className="input-field mt-1 min-h-[3.5rem] w-full text-sm" value={form.salesRemark} onChange={(e) => setFormField('salesRemark', e.target.value)} />
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-ash/80 bg-[#fafafa] p-3">
-            <h4 className="text-xs font-bold uppercase tracking-wide text-graphite">客户评价</h4>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {(
-                [
-                  ['普通文字评价数', 'textReviewCount'],
-                  ['图片评价数', 'imageReviewCount'],
-                  ['视频评价数', 'videoReviewCount'],
-                  ['追评数量', 'followReviewCount'],
-                ] as const
-              ).map(([label, key]) => (
-                <label key={key} className="text-xs text-graphite">
-                  {label}
-                  <input
-                    type="number"
-                    min={0}
-                    className="input-field mt-1 block w-full text-sm tabular-nums"
-                    value={form[key]}
-                    onChange={(e) => setFormField(key, Number(e.target.value))}
-                  />
-                </label>
-              ))}
-              <div className="sm:col-span-2 lg:col-span-4">
-                <span className="text-xs text-graphite">评价截图上传</span>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <label className="btn-ghost cursor-pointer text-xs">
-                    选择图片
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onPickImages('reviewProofImages', e)} />
-                  </label>
-                </div>
-                {form.reviewProofImages.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {form.reviewProofImages.map((src, i) => (
-                      <div key={i} className="relative h-16 w-16 overflow-hidden rounded border border-ash bg-white">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={src} alt="" className="h-full w-full object-cover" />
-                        <button
-                          type="button"
-                          className="absolute right-0 top-0 rounded-bl bg-black/60 px-1 text-[10px] text-white"
-                          onClick={() =>
-                            setForm((prev) =>
-                              applyFormDerived({ ...prev, reviewProofImages: prev.reviewProofImages.filter((_, j) => j !== i) }),
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <label className="text-xs text-graphite sm:col-span-2 lg:col-span-4">
-                评价备注
-                <textarea className="input-field mt-1 min-h-[3.5rem] w-full text-sm" value={form.reviewRemark} onChange={(e) => setFormField('reviewRemark', e.target.value)} />
-              </label>
-            </div>
-          </section>
-
-          {isSupervisor && editingId ? (
-            <section className="rounded-lg border border-dashed border-sky-300 bg-sky-50/50 p-3">
-              <h4 className="text-xs font-bold text-sky-900">主管审核备注（可修改）</h4>
+          {/* 客服确认 */}
+          <Card className="border border-ash p-4 space-y-3">
+            <h3 className="font-display text-base font-semibold text-coal-ink">客服确认</h3>
+            {summary?.flowStatus === 'rejected' && summary.rejectReason ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                驳回原因：{summary.rejectReason}
+              </p>
+            ) : null}
+            <label className="block text-xs text-graphite">
+              今日工作备注
               <textarea
-                className="input-field mt-2 min-h-[3rem] w-full text-sm"
-                value={form.managerRemark}
-                onChange={(e) => setFormField('managerRemark', e.target.value)}
+                className="input-field mt-1 min-h-[56px] w-full text-sm"
+                disabled={summary?.flowStatus === 'pending_review' || summary?.flowStatus === 'approved'}
+                value={draft.employeeRemark}
+                onChange={(e) => setDraft((d) => ({ ...d, employeeRemark: e.target.value }))}
               />
-            </section>
-          ) : null}
-
-          {derivedBar}
-
-          <div className="flex flex-wrap gap-2 border-t border-ash pt-4">
-            {editingId ? (
-              <>
-                <button type="button" className="btn-primary text-sm" onClick={saveEdit}>
-                  保存修改
-                </button>
-                {form.auditStatus === 'rejected' && !isSupervisor ? (
-                  <button type="button" className="btn-primary text-sm" onClick={resubmitAfterReject}>
-                    修改后重新提交审核
-                  </button>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <button type="button" className="btn-ghost text-sm" onClick={saveDraft}>
-                  保存草稿
-                </button>
-                <button type="button" className="btn-primary text-sm" onClick={submitForReview}>
-                  提交审核
-                </button>
-              </>
-            )}
-            <button type="button" className="btn-ghost text-sm" onClick={resetForm}>
-              取消编辑
-            </button>
-          </div>
-        </div>
-      </Card>
-
-      <div className="overflow-x-auto rounded-[10px] border border-ash bg-white">
-        <table className="w-full min-w-[1100px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-ash bg-ash/50 text-left text-xs font-semibold text-graphite">
-              <th className="px-2 py-2">日期</th>
-              <th className="px-2 py-2">客服</th>
-              <th className="px-2 py-2">班次</th>
-              <th className="px-2 py-2">店铺</th>
-              <th className="px-2 py-2">AI次数</th>
-              <th className="px-2 py-2">留资分</th>
-              <th className="px-2 py-2">已电联</th>
-              <th className="px-2 py-2">有效电联</th>
-              <th className="px-2 py-2">净销售额</th>
-              <th className="px-2 py-2">有效评价</th>
-              <th className="px-2 py-2">状态</th>
-              <th className="max-w-[200px] px-2 py-2">驳回原因</th>
-              <th className="px-2 py-2 w-52">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredList.length === 0 ? (
-              <tr>
-                <td colSpan={13} className="px-3 py-10 text-center text-stone">
-                  暂无记录。请使用上方表单新建，或调整筛选条件。
-                </td>
-              </tr>
-            ) : (
-              filteredList.map((r) => (
-                <tr key={r.id} className="border-b border-ash/70">
-                  <td className="px-2 py-2 tabular-nums text-stone">{r.date}</td>
-                  <td className="px-2 py-2 font-medium">{r.employeeName}</td>
-                  <td className="px-2 py-2">{r.shift === 'night' ? '晚班' : '白班'}</td>
-                  <td className="max-w-[140px] truncate px-2 py-2" title={r.storeName}>
-                    {r.storeName}
-                  </td>
-                  <td className="px-2 py-2 tabular-nums">{r.aiUseCount}</td>
-                  <td className="px-2 py-2 tabular-nums">{r.highQualityLeadScore.toFixed(2)}</td>
-                  <td className="px-2 py-2 tabular-nums">{r.calledCount}</td>
-                  <td className="px-2 py-2 tabular-nums">{r.validCallCount}</td>
-                  <td className="px-2 py-2 tabular-nums">{formatAmountYuan(r.netSalesAmount)}</td>
-                  <td className="px-2 py-2 tabular-nums">{r.effectiveReviewScore.toFixed(2)}</td>
-                  <td className="px-2 py-2">
-                    <WorkflowStatusBadge status={kpiAuditToWorkflow(r.auditStatus)} size="sm" />
-                  </td>
-                  <td className="max-w-[200px] px-2 py-2 text-xs text-rose-800" title={r.rejectReason || ''}>
-                    {r.auditStatus === 'rejected' && r.rejectReason ? r.rejectReason : '—'}
-                  </td>
-                  <td className="px-2 py-2">
-                    <div className="flex flex-wrap gap-1 text-xs">
-                      <button type="button" className="text-signal-violet underline" onClick={() => setViewRow(r)}>
-                        查看
-                      </button>
-                      {(canEditRecord(r) || isSupervisor) && (
-                        <button type="button" className="text-coal-ink underline" onClick={() => startEdit(r)}>
-                          编辑
-                        </button>
-                      )}
-                      {isSupervisor && r.auditStatus === 'pending_review' ? (
-                        <>
-                          <button type="button" className="text-emerald-700 underline" onClick={() => approveRow(r)}>
-                            通过
-                          </button>
-                          <button type="button" className="text-rose-700 underline" onClick={() => openReject(r)}>
-                            驳回
-                          </button>
-                        </>
-                      ) : null}
-                      <button type="button" className="text-red-600 underline" onClick={() => removeRow(r)}>
-                        删除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {viewRow ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[12px] border border-ash bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="font-display text-lg font-bold text-coal-ink">查看 KPI 日报</h3>
-              <button type="button" className="btn-ghost text-sm" onClick={() => setViewRow(null)}>
-                关闭
+            </label>
+            <label className="block text-xs text-graphite">
+              今日重点客户
+              <input
+                className="input-field mt-1 w-full text-sm"
+                disabled={summary?.flowStatus === 'pending_review' || summary?.flowStatus === 'approved'}
+                value={draft.keyCustomers}
+                onChange={(e) => setDraft((d) => ({ ...d, keyCustomers: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs text-graphite">
+              今日问题反馈
+              <input
+                className="input-field mt-1 w-full text-sm"
+                disabled={summary?.flowStatus === 'pending_review' || summary?.flowStatus === 'approved'}
+                value={draft.todayIssues}
+                onChange={(e) => setDraft((d) => ({ ...d, todayIssues: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs text-graphite">
+              需要主管支持
+              <input
+                className="input-field mt-1 w-full text-sm"
+                disabled={summary?.flowStatus === 'pending_review' || summary?.flowStatus === 'approved'}
+                value={draft.needManagerSupport}
+                onChange={(e) => setDraft((d) => ({ ...d, needManagerSupport: e.target.value }))}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary text-sm"
+                disabled={
+                  !summary ||
+                  summary.flowStatus === 'pending_review' ||
+                  summary.flowStatus === 'approved' ||
+                  !mergedLive
+                }
+                onClick={submitForReview}
+              >
+                确认提交审核
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-sm"
+                disabled={summary?.flowStatus === 'pending_review' || summary?.flowStatus === 'approved'}
+                onClick={saveNotes}
+              >
+                保存备注
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-sm"
+                onClick={() => {
+                  const cur = findSummary(date, staff);
+                  if (!cur || !staff) return;
+                  const { sources, exceptions } = aggregateKpiFromSources(date, staff);
+                  upsertSummary({ ...cur, sourceSummary: sources, exceptions, dataRefreshedAt: isoNow(), updatedAt: isoNow() });
+                  reload();
+                }}
+              >
+                刷新汇总
               </button>
             </div>
-            <KpiSubmissionDetailPanel submission={viewRow} />
-          </div>
-        </div>
-      ) : null}
+          </Card>
 
-      {rejectRow ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog">
-          <div className="w-full max-w-md rounded-[12px] border border-ash bg-white p-5 shadow-xl">
-            <h3 className="font-display text-base font-bold text-coal-ink">驳回原因</h3>
-            <p className="mt-1 text-xs text-stone">
-              {rejectRow.employeeName} · {rejectRow.date}
-            </p>
-            <textarea className="input-field mt-3 min-h-[6rem] w-full text-sm" value={rejectReasonInput} onChange={(e) => setRejectReasonInput(e.target.value)} placeholder="请填写驳回原因（必填）" />
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="btn-ghost text-sm" onClick={() => setRejectRow(null)}>
+          {/* 手动补录 */}
+          <Card className="border border-dashed border-ash p-4 space-y-3">
+            <h3 className="font-display text-base font-semibold text-coal-ink">手动补录（需原因+凭证，主管通过后才计入）</h3>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-xs text-graphite">
+                类型
+                <select className="input-field mt-1 w-full text-sm" value={manualType} onChange={(e) => setManualType(e.target.value)}>
+                  {ADJUST_TYPES.map((t) => (
+                    <option key={t.v} value={t.v}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-graphite">
+                数值
+                <input
+                  type="number"
+                  className="input-field mt-1 w-full text-sm"
+                  value={manualValue}
+                  onChange={(e) => setManualValue(e.target.value)}
+                />
+              </label>
+              <label className="text-xs text-graphite sm:col-span-2">
+                原因（必填）
+                <input className="input-field mt-1 w-full text-sm" value={manualReason} onChange={(e) => setManualReason(e.target.value)} />
+              </label>
+              <label className="text-xs text-graphite sm:col-span-2">
+                备注
+                <input className="input-field mt-1 w-full text-sm" value={manualNote} onChange={(e) => setManualNote(e.target.value)} />
+              </label>
+              <label className="text-xs text-graphite sm:col-span-2">
+                凭证截图（必填）
+                <input type="file" accept="image/*" multiple className="mt-1 block text-sm" onChange={(e) => setManualFiles(e.target.files)} />
+              </label>
+            </div>
+            <button type="button" className="btn-ghost text-sm" onClick={() => void addManualAdjustment()}>
+              提交补录申请
+            </button>
+
+            {adjustments.filter((a) => a.date === date && a.employeeName === staff).length ? (
+              <div className="mt-2 overflow-x-auto">
+                <table className="min-w-[640px] w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-ash text-graphite">
+                      <th className="py-2 text-left">类型</th>
+                      <th className="py-2 text-left">值</th>
+                      <th className="py-2 text-left">状态</th>
+                      <th className="py-2 text-left">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adjustments
+                      .filter((a) => a.date === date && a.employeeName === staff)
+                      .map((a) => (
+                        <tr key={a.id} className="border-b border-ash/70">
+                          <td className="py-2">{a.adjustType}</td>
+                          <td className="py-2">{a.value}</td>
+                          <td className="py-2">{a.auditStatus}</td>
+                          <td className="py-2">
+                            {isSupervisor && a.auditStatus === 'pending_review' ? (
+                              <span className="space-x-2">
+                                <button type="button" className="text-emerald-800 underline" onClick={() => approveAdjustment(a)}>
+                                  通过
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-red-700 underline"
+                                  onClick={() => {
+                                    const rs = window.prompt('驳回原因');
+                                    if (rs) rejectAdjustment(a, rs);
+                                  }}
+                                >
+                                  驳回
+                                </button>
+                              </span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </Card>
+
+          {/* 主管当日列表 */}
+          {isSupervisor ? (
+            <Card className="border border-ash p-4">
+              <h3 className="font-display text-base font-semibold text-coal-ink">
+                当日审核队列 · {date}（待审 {daySummaries.filter((s) => s.flowStatus === 'pending_review').length}）
+              </h3>
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-[720px] w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-ash bg-ash/40 text-left text-xs text-graphite">
+                      <th className="px-2 py-2">客服</th>
+                      <th className="px-2 py-2">状态</th>
+                      <th className="px-2 py-2">提交时间</th>
+                      <th className="px-2 py-2">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {daySummaries.map((row) => (
+                      <tr key={row.id} className="border-b border-ash/80">
+                        <td className="px-2 py-2">{row.employeeName}</td>
+                        <td className="px-2 py-2">{FLOW_LABEL[row.flowStatus]}</td>
+                        <td className="px-2 py-2 text-xs">{row.submittedAt?.slice(0, 19) ?? '—'}</td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          {row.flowStatus === 'pending_review' ? (
+                            <span className="space-x-2">
+                              <button type="button" className="text-emerald-800 underline text-xs" onClick={() => supervisorApprove(row)}>
+                                通过
+                              </button>
+                              <button type="button" className="text-red-700 underline text-xs" onClick={() => setRejectOpen(row)}>
+                                驳回
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="text-stone text-xs">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {pendingAdj.length ? (
+                <p className="mt-2 text-xs text-amber-900">另有 {pendingAdj.length} 条手动补录待审核。</p>
+              ) : null}
+            </Card>
+          ) : null}
+        </>
+      )}
+
+      {rejectOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <Card className="max-w-md border border-ash bg-white p-4 shadow-xl">
+            <h4 className="font-semibold text-coal-ink">驳回 KPI 汇总</h4>
+            <p className="mt-2 text-xs text-graphite">{rejectOpen.employeeName}</p>
+            <textarea
+              className="input-field mt-3 min-h-[80px] w-full text-sm"
+              placeholder="驳回原因"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" className="btn-ghost text-sm" onClick={() => setRejectOpen(null)}>
                 取消
               </button>
-              <button type="button" className="btn-primary text-sm" onClick={confirmReject}>
+              <button type="button" className="btn-primary text-sm" onClick={supervisorReject}>
                 确认驳回
               </button>
             </div>
-          </div>
+          </Card>
         </div>
       ) : null}
     </div>

@@ -12,7 +12,7 @@ import type {
   DashboardException,
   DashboardExceptionCategory,
   DashboardOverview,
-  ExceptionHandleMap,
+  ExceptionHandleStatus,
   ExceptionSeverity,
   StaffTodayRow,
 } from './dashboard-types';
@@ -27,7 +27,7 @@ export type DashboardBuildInput = {
   shiftFilter: 'all' | 'day' | 'night';
   shopFilter: string;
   staffFilter: string;
-  handleMap: ExceptionHandleMap;
+  handleMap: Record<string, ExceptionHandleStatus>;
 };
 
 function matchesShift(inst: TaskInstance, shift: 'all' | 'day' | 'night'): boolean {
@@ -86,7 +86,7 @@ function staffRowStatus(row: Pick<StaffTodayRow, 'taskRate' | 'p0Overdue' | 'kpi
   return { statusLabel: '严重落后', statusTone: 'red' };
 }
 
-function mergeHandle(id: string, map: ExceptionHandleMap): 'open' | 'done' | 'ignored' {
+function mergeHandle(id: string, map: Record<string, ExceptionHandleStatus>): 'open' | 'done' | 'ignored' {
   return map[id] ?? 'open';
 }
 
@@ -319,7 +319,7 @@ export function buildExceptions(input: DashboardBuildInput, rows: StaffTodayRow[
           kpiSubmissionId: primary.id,
         });
       }
-      if (resolvedTodayLeadCount(m) <= 0 && primary.auditStatus !== 'draft') {
+      if (resolvedTodayLeadCount(m) <= 0) {
         push({
           id: `${date}::lead_zero::${staff}::${primary.id}`,
           occurredAt: ts,

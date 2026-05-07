@@ -11,7 +11,8 @@ export type NavFocusStored = {
 
 /** 角色 code 与常见别名 → 默认重点 path（与 DASHBOARD_NAV_ITEMS 一致） */
 const ROLE_DEFAULT_PATHS: Record<string, string[]> = {
-  客服: ['/dashboard/daily-sales', '/dashboard/conversions'],
+  客服: ['/dashboard/daily-sales', '/dashboard/lead-follow'],
+  service: ['/dashboard/daily-sales', '/dashboard/lead-follow'],
   运营: ['/dashboard/tasks', '/dashboard/supervisor-board'],
 };
 

@@ -1,43 +1,60 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { getInitialTaskState } from '@/lib/today-tasks/seed';
-import { getTaskStaffName, loadTodayTasks, saveTodayTasks, setTaskStaffName } from '@/lib/today-tasks/storage';
+import { useCallback, useEffect, useState } from 'react';
 import { WORKSPACE_STORAGE_UPDATED } from '@/lib/workspace-events';
-import { buildInstances } from '@/lib/today-tasks/engine';
-import { cn } from '@/lib/utils';
-import { requestNotificationPermission, useTaskReminders } from './useTaskReminders';
-import { TodayWorkbench } from './TodayWorkbench';
-import { TemplatesPanel } from './TemplatesPanel';
-import { AssignmentsPanel } from './AssignmentsPanel';
-import { SupervisorPanel } from './SupervisorPanel';
-import type { TodayTaskState } from '@/lib/today-tasks/types';
-
-type Tab = 'workbench' | 'tpl' | 'asg' | 'sup';
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'workbench', label: '今日工作台' },
-  { id: 'tpl', label: '任务模板' },
-  { id: 'asg', label: '分配任务' },
-  { id: 'sup', label: '主管看板' },
-];
+import { requestNotificationPermission } from './useTaskReminders';
+import { DailyWorkPackagePanel } from '@/components/daily-work-package/DailyWorkPackagePanel';
+import { LS_TODAY_CENTER_SHIFT } from '@/lib/shift-sop/storage-keys';
+import { loadSopProgress, loadSopTemplates, saveSopProgress } from '@/lib/shift-sop/storage';
+import { loadSopDailyOverrides } from '@/lib/shift-sop/daily-override-storage';
+import { getEffectiveSopShift } from '@/lib/shift-sop/effective-shift';
+import { ShiftSopTimelinePanel } from '@/components/shift-sop/ShiftSopTimelinePanel';
+import { AssignedTasksCustomerList } from '@/components/assigned-tasks/AssignedTasksCustomerList';
+import { loadAssignedTasks, saveAssignedTasks } from '@/lib/assigned-tasks/storage';
+import { DailyRequiredSection } from '@/components/today-tasks/DailyRequiredSection';
+import { WeeklyReminderStrip } from '@/components/today-tasks/WeeklyReminderStrip';
+import { getTaskStaffName, setTaskStaffName } from '@/lib/today-tasks/storage';
+import Link from 'next/link';
 
 export function TodayTasksApp() {
-  const [data, setData] = useState<TodayTaskState>(getInitialTaskState);
-  const [tab, setTab] = useState<Tab>('workbench');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [staff, setStaff] = useState('');
+  const [shift, setShift] = useState('day');
   const [roster, setRoster] = useState<string[]>([]);
   const [noti, setNoti] = useState('');
+  const [role, setRole] = useState<string | null>(null);
+  const [userName, setUserName] = useState('');
+  const [sopTemplates, setSopTemplates] = useState(() => loadSopTemplates());
+  const [sopProgress, setSopProgress] = useState(() => loadSopProgress());
+  const [sopOverrides, setSopOverrides] = useState(() => loadSopDailyOverrides());
+  const [assigned, setAssigned] = useState(() => loadAssignedTasks());
+  const [wpOpen, setWpOpen] = useState(false);
+
+  const isPrivileged = role === 'admin' || role === 'manager';
+  const isStaffOnly = role === 'service' || role === 'trainee';
+
+  const reloadSop = useCallback(() => {
+    setSopTemplates(loadSopTemplates());
+    setSopProgress(loadSopProgress());
+    setSopOverrides(loadSopDailyOverrides());
+    setAssigned(loadAssignedTasks());
+  }, []);
 
   useEffect(() => {
-    saveTodayTasks(data);
-  }, [data]);
+    const fn = () => reloadSop();
+    window.addEventListener(WORKSPACE_STORAGE_UPDATED, fn);
+    return () => window.removeEventListener(WORKSPACE_STORAGE_UPDATED, fn);
+  }, [reloadSop]);
 
   useEffect(() => {
-    const reload = () => setData(loadTodayTasks());
-    window.addEventListener(WORKSPACE_STORAGE_UPDATED, reload);
-    return () => window.removeEventListener(WORKSPACE_STORAGE_UPDATED, reload);
+    fetch('/api/session', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((j) => {
+        setRole(j?.user?.role ? String(j.user.role) : null);
+        const n = j?.user?.name;
+        if (typeof n === 'string' && n.trim()) setUserName(n.trim());
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -47,24 +64,38 @@ export function TodayTasksApp() {
         const r0 = Array.isArray(d.staff_roster) ? d.staff_roster : [];
         setRoster(r0);
         const saved = getTaskStaffName();
-        if (saved && r0.includes(saved)) setStaff(saved);
-        else if (r0[0]) {
+        if (isStaffOnly && userName) {
+          setStaff(userName);
+          setTaskStaffName(userName);
+        } else if (saved && r0.includes(saved)) {
+          setStaff(saved);
+        } else if (r0[0]) {
           setStaff(r0[0]);
           setTaskStaffName(r0[0]);
         }
       })
       .catch(() => {});
-  }, []);
+  }, [isStaffOnly, userName]);
 
   useEffect(() => {
     if (staff) setTaskStaffName(staff);
   }, [staff]);
 
-  const myList = useMemo(
-    () => buildInstances(data, date).filter((i) => i.staffName === staff),
-    [data, date, staff],
-  );
-  useTaskReminders(myList, tab === 'workbench');
+  useEffect(() => {
+    const s = typeof window !== 'undefined' ? localStorage.getItem(LS_TODAY_CENTER_SHIFT) : null;
+    if (s === 'night') setShift('night');
+  }, []);
+
+  useEffect(() => {
+    if (isStaffOnly && userName) setStaff(userName);
+  }, [isStaffOnly, userName]);
+
+  const persistShift = useCallback((s: string) => {
+    setShift(s);
+    if (typeof window !== 'undefined') localStorage.setItem(LS_TODAY_CENTER_SHIFT, s);
+  }, []);
+
+  const effectiveShift = staff ? getEffectiveSopShift(date, staff, shift, sopOverrides) : 'day';
 
   const enableNoti = async () => {
     const p = await requestNotificationPermission();
@@ -75,7 +106,18 @@ export function TodayTasksApp() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm text-slate-mid">售前团队每日待办、时段、优先级与完成凭证（数据存本机，详见 docs/TODAY-TASK-CENTER-PRD.md）。</p>
+          <p className="text-sm text-slate-mid">
+            客服执行页：本班次 SOP 时间轴、主管临时任务、结班必交与本周提醒。模板与派单请在「配置中心」与「SOP执行检查台」完成。
+          </p>
+          {isPrivileged ? (
+            <p className="mt-1 text-xs text-amber-800">
+              当前为管理账号预览：可切换客服姓名。派单与全员进度请打开{' '}
+              <Link href="/dashboard/supervisor-board" className="font-medium underline">
+                主管数据看板
+              </Link>
+              。
+            </p>
+          ) : null}
         </div>
         <button type="button" className="btn-ghost self-start text-sm" onClick={() => void enableNoti()}>
           开启浏览器提醒
@@ -88,44 +130,81 @@ export function TodayTasksApp() {
           业务日
           <input type="date" className="input-field mt-1 block text-sm" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
-        <label className="text-xs text-graphite">
-          当前客服
-          <select className="input-field mt-1 block min-w-[8rem] text-sm" value={staff} onChange={(e) => setStaff(e.target.value)}>
-            <option value="">请选择</option>
-            {roster.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="text-xs text-stone sm:ml-auto">客服名单与后台 <code className="rounded bg-ash px-1">staff_roster</code> 同步</p>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={cn(
-              'rounded-full px-4 py-2 text-sm font-medium transition',
-              tab === t.id ? 'bg-coal-ink text-white' : 'bg-ash/80 text-graphite hover:bg-ash',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="min-h-[320px]">
-        {tab === 'workbench' && (
-          <TodayWorkbench data={data} setData={setData} date={date} staff={staff} roster={roster} />
+        {!isStaffOnly ? (
+          <label className="text-xs text-graphite">
+            当前客服
+            <select className="input-field mt-1 block min-w-[8rem] text-sm" value={staff} onChange={(e) => setStaff(e.target.value)}>
+              <option value="">请选择</option>
+              {roster.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="text-sm text-graphite">
+            当前客服：<span className="font-semibold text-coal-ink">{staff || userName || '…'}</span>
+          </div>
         )}
-        {tab === 'tpl' && <TemplatesPanel data={data} setData={setData} />}
-        {tab === 'asg' && <AssignmentsPanel data={data} setData={setData} roster={roster} />}
-        {tab === 'sup' && <SupervisorPanel data={data} setData={setData} date={date} />}
+        <p className="text-xs text-stone sm:ml-auto">
+          管理功能见 <Link className="underline" href="/dashboard/supervisor-board">SOP检查台</Link> ·{' '}
+          <Link className="underline" href="/dashboard/settings">配置中心</Link>
+        </p>
       </div>
+
+      <section className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-base font-semibold text-coal-ink">
+            当前班次 SOP 时间轴（{effectiveShift === 'day' ? '白班' : '晚班'}）
+          </h2>
+          <p className="text-xs text-slate-mid">班次可在下方「每日工作包」内切换；主管当日覆盖以配置为准。</p>
+        </div>
+        <ShiftSopTimelinePanel
+          shiftType={effectiveShift}
+          date={date}
+          staff={staff}
+          templates={sopTemplates}
+          progress={sopProgress}
+          onProgressChange={(next) => {
+            saveSopProgress(next);
+            setSopProgress(next);
+          }}
+        />
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-display text-base font-semibold text-coal-ink">主管临时分配任务</h2>
+        <AssignedTasksCustomerList
+          date={date}
+          staff={staff}
+          tasks={assigned}
+          onUpdate={(next) => {
+            saveAssignedTasks(next);
+            setAssigned(next);
+          }}
+        />
+      </section>
+
+      <DailyRequiredSection date={date} staff={staff} />
+
+      <WeeklyReminderStrip date={date} staff={staff} />
+
+      <section className="space-y-2">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between rounded-lg border border-ash bg-ledger-white px-3 py-2 text-left text-sm font-medium text-coal-ink"
+          onClick={() => setWpOpen((o) => !o)}
+        >
+          <span>每日工作包（询单、留资、评价、电联等）</span>
+          <span className="text-xs text-graphite">{wpOpen ? '收起' : '展开'}</span>
+        </button>
+        {wpOpen ? (
+          <div className="rounded-lg border border-ash p-2">
+            <DailyWorkPackagePanel date={date} staff={staff} shift={shift} onShiftChange={persistShift} />
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

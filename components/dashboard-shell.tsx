@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Bell, ChevronDown, ChevronUp, LayoutGrid, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -132,6 +132,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     setOrderedNav(next);
   }, []);
 
+  /** 普通客服侧栏隐藏主管检查台（路由仍可手动访问时会由页面提示无权） */
+  const sidebarNav = useMemo(() => {
+    if (canReorder) return orderedNav;
+    const r = String(sessionUser?.role ?? '').toLowerCase();
+    const staffLike = r === 'service' || r === 'trainee' || r === 'agent' || r === 'staff';
+    if (!staffLike) return orderedNav;
+    return orderedNav.filter((x) => x.path !== '/dashboard/supervisor-board');
+  }, [orderedNav, canReorder, sessionUser]);
+
   const move = useCallback(
     (index: number, delta: -1 | 1) => {
       const j = index + delta;
@@ -250,7 +259,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </p>
         ) : null}
         <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-3 scrollbar-none">
-          {orderedNav.map(({ label, path }, i) => {
+          {sidebarNav.map(({ label, path }, i) => {
             const active = navActive(pathname, path);
             const isFocus = focusPaths.has(path);
             return (
@@ -279,7 +288,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                       : isFocus
                         ? 'text-[#ffab47] hover:text-[#ffc266]'
                         : 'text-white/70 hover:text-white',
-                    isFocus && 'font-semibold',
+                    isFocus ? 'font-semibold' : '',
                   )}
                 >
                   {label}
@@ -301,7 +310,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                     <button
                       type="button"
                       aria-label={`「${label}」下移`}
-                      disabled={i === orderedNav.length - 1}
+                      disabled={i === sidebarNav.length - 1}
                       className="rounded p-0.5 text-white/75 hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
                       onClick={(e) => {
                         e.preventDefault();

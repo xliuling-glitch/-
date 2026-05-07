@@ -9,7 +9,6 @@ import {
   type CustomerTypeRow,
   type FollowupStatusRow,
   type InquiryTypeRow,
-  type KpiMetricRow,
   type LostReasonRow,
   type ReminderRuleRow,
   type ReviewTaskRuleRow,
@@ -18,8 +17,9 @@ import {
   type StaffRow,
   type TodayTaskTemplateRow,
   type LegacyOptions,
-  type ConfigCenterV2,
 } from '@/lib/config-center-v2';
+import { ConfigCenterSopPanel } from '@/components/config-center/ConfigCenterSopPanel';
+import { ConfigCenterKpiSettingsPanel } from '@/components/config-center/ConfigCenterKpiSettingsPanel';
 
 const TABS = [
   { id: 'basic', label: '基础字典' },
@@ -29,8 +29,9 @@ const TABS = [
   { id: 'status', label: '跟进状态' },
   { id: 'lost', label: '未成交原因' },
   { id: 'staff', label: '员工' },
-  { id: 'kpi', label: 'KPI 指标' },
+  { id: 'kpi', label: 'KPI 设置' },
   { id: 'tasks', label: '今日任务模板' },
+  { id: 'sop_timeline', label: 'SOP时间轴配置' },
   { id: 'review', label: '评价任务规则' },
   { id: 'remind', label: '提醒规则' },
   { id: 'roles', label: '权限角色' },
@@ -737,54 +738,14 @@ export function ConfigCenterApp() {
         );
       case 'kpi':
         return (
-          <table className="w-full min-w-[900px] border-collapse text-sm">
-            <thead>
-              <tr>
-                <Th className="w-10">序</Th>
-                <Th>KPI 名称</Th>
-                <Th>权重</Th>
-                <Th>目标周期</Th>
-                <Th>计算方式</Th>
-                <Th className="w-14">启用</Th>
-                <Th>备注</Th>
-                <Th className="w-44">操作</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {config.kpiMetrics.map((row: KpiMetricRow, i) => (
-                <tr key={row.id}>
-                  <td className={cellClass(ro)}>{i + 1}</td>
-                  <td className={cellClass(ro)}>
-                    <TextCell v={row.name} disabled={ro} onChange={(name) => applyPatch('kpiMetrics', (rs) => rs.map((r, j) => (j === i ? { ...r, name } : r)))} />
-                  </td>
-                  <td className={cellClass(ro)}>
-                    <NumCell step="0.01" v={row.weight} disabled={ro} onChange={(weight) => applyPatch('kpiMetrics', (rs) => rs.map((r, j) => (j === i ? { ...r, weight } : r)))} />
-                  </td>
-                  <td className={cellClass(ro)}>
-                    <TextCell v={row.targetPeriod} disabled={ro} narrow onChange={(targetPeriod) => applyPatch('kpiMetrics', (rs) => rs.map((r, j) => (j === i ? { ...r, targetPeriod } : r)))} />
-                  </td>
-                  <td className={cellClass(ro)}>
-                    <TextCell v={row.calcMethod} disabled={ro} onChange={(calcMethod) => applyPatch('kpiMetrics', (rs) => rs.map((r, j) => (j === i ? { ...r, calcMethod } : r)))} />
-                  </td>
-                  <td className={cellClass(ro)}>
-                    <BoolCell v={row.enabled} disabled={ro} onChange={(enabled) => applyPatch('kpiMetrics', (rs) => rs.map((r, j) => (j === i ? { ...r, enabled } : r)))} />
-                  </td>
-                  <td className={cellClass(ro)}>
-                    <TextCell v={row.remark} disabled={ro} onChange={(remark) => applyPatch('kpiMetrics', (rs) => rs.map((r, j) => (j === i ? { ...r, remark } : r)))} />
-                  </td>
-                  <td className={cellClass(ro)}>
-                    <RowActions
-                      i={i}
-                      len={config.kpiMetrics.length}
-                      disabled={ro}
-                      onMove={(d) => applyPatch('kpiMetrics', (rs) => move(rs, i, d))}
-                      onDelete={() => applyPatch('kpiMetrics', (rs) => rs.filter((_, j) => j !== i))}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ConfigCenterKpiSettingsPanel
+            canEdit={canEdit}
+            ro={ro}
+            shops={config.shops.filter((s) => s.enabled).map((s) => s.name)}
+            staff={config.staff}
+            legacyKpiMetrics={config.kpiMetrics}
+            onLegacyKpiPatch={(fn) => applyPatch('kpiMetrics', fn)}
+          />
         );
       case 'tasks':
         return (
@@ -1022,6 +983,8 @@ export function ConfigCenterApp() {
             </tbody>
           </table>
         );
+      case 'sop_timeline':
+        return <ConfigCenterSopPanel canEdit={canEdit} />;
       default:
         return null;
     }
@@ -1130,22 +1093,7 @@ export function ConfigCenterApp() {
             ],
           };
         case 'kpi':
-          return {
-            ...c,
-            kpiMetrics: [
-              ...c.kpiMetrics,
-              {
-                id: rid(),
-                enabled: true,
-                sortOrder: c.kpiMetrics.length,
-                remark: '',
-                name: '新 KPI',
-                weight: 0.1,
-                targetPeriod: '月',
-                calcMethod: '',
-              },
-            ],
-          };
+          return c;
         case 'tasks':
           return {
             ...c,
@@ -1220,14 +1168,13 @@ export function ConfigCenterApp() {
               },
             ],
           };
+        case 'sop_timeline':
+          return c;
         default:
           return c;
       }
     });
   };
-
-  // remove dead code line in addRow - I had a typo line with `const n =` - need to remove
-  // Looking at my addRow - I have broken line "const n = config[tab === ..." - remove it
 
   if (loading || !config) {
     return (
@@ -1286,9 +1233,11 @@ export function ConfigCenterApp() {
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[var(--color-coal-ink)]">{TABS.find((x) => x.id === tab)?.label}</h3>
-            <button type="button" className="btn-secondary" disabled={disabled} onClick={addRow}>
-              新增一行
-            </button>
+            {tab === 'sop_timeline' ? null : (
+              <button type="button" className="btn-secondary" disabled={disabled} onClick={addRow}>
+                新增一行
+              </button>
+            )}
           </div>
           <div className="overflow-x-auto rounded-xl border border-black/10 bg-[var(--surface-elevated)] p-3 shadow-sm">{renderPanel()}</div>
           <p className="text-[11px] leading-relaxed text-[var(--color-slate-mid)]">

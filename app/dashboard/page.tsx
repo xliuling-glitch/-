@@ -10,12 +10,11 @@ import { formatAmountYuan } from '@/lib/format-amount';
 
 const modules = [
   { title: '今日任务中心', href: '/dashboard/tasks', icon: '📋', desc: '生成、查看和完成任务' },
-  { title: 'KPI每日上传中心', href: '/dashboard/kpi-daily', icon: '📤', desc: '日报表单、审核与任务联动' },
-  { title: '主管数据看板', href: '/dashboard/supervisor-board', icon: '📈', desc: '任务与KPI聚合、关注清单' },
-  { title: '客户管理', href: '/dashboard/customers', icon: '👥', desc: '客户列表与详情' },
+  { title: 'KPI汇总确认', href: '/dashboard/kpi-daily', icon: '📤', desc: '各模块自动汇总、客服确认与主管审核' },
+  { title: 'SOP执行检查台', href: '/dashboard/supervisor-board', icon: '📈', desc: '各客服SOP执行与临时任务审核' },
   { title: '客户跟进', href: '/dashboard/followups', icon: '📝', desc: '跟进记录管理' },
   { title: '电联管理', href: '/dashboard/calls', icon: '📞', desc: '通话记录与统计' },
-  { title: '询单转化', href: '/dashboard/conversions', icon: '💰', desc: '询单转化数据分析' },
+  { title: '留资跟进表', href: '/dashboard/lead-follow', icon: '💰', desc: '日报询单、留资登记与留资率统计' },
   { title: 'KPI绩效', href: '/dashboard/kpi', icon: '📊', desc: 'KPI记录与考核' },
   { title: '老客复购', href: '/dashboard/repurchase', icon: '🔄', desc: '复购提醒与追踪' },
   { title: '评价管理中心', href: '/dashboard/reviews', icon: '⭐', desc: '多店铺产品评价任务与审核' },
